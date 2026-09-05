@@ -12,7 +12,11 @@ export function onAuthStateChange(cb) {
 }
 
 export async function signUp(email, password) {
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: window.location.origin + import.meta.env.BASE_URL },
+  });
   if (error) throw error;
   return data; // { user, session } — session est null si la confirmation email est exigée
 }
@@ -70,7 +74,10 @@ export async function uploadAvatar(userId, file) {
 }
 
 export async function updateEmail(newEmail) {
-  const { error } = await supabase.auth.updateUser({ email: newEmail });
+  const { error } = await supabase.auth.updateUser(
+    { email: newEmail },
+    { emailRedirectTo: window.location.origin + import.meta.env.BASE_URL }
+  );
   if (error) throw error;
 }
 
