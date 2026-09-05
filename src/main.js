@@ -25,7 +25,10 @@ const S = {
   expenses: [],
   settlements: [],
   friends: [],
+  pendingInvites: [],
   friendSearchResults: [],
+  friendSearchQuery: '',
+  friendSearchNoMatch: false,
   unsubscribe: null,
   inlineEdit: null, // { type: 'member', id } | { type: 'confirm-remove-member', id }
 };
@@ -85,8 +88,16 @@ async function routeFromHash() {
 
 async function loadFriends() {
   if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
-  const friends = await api.listFriends();
-  setState({ view: 'friends', friends, friendSearchResults: [], error: '' });
+  const [friends, pendingInvites] = await Promise.all([api.listFriends(), api.listPendingFriendInvites()]);
+  setState({
+    view: 'friends',
+    friends,
+    pendingInvites,
+    friendSearchResults: [],
+    friendSearchQuery: '',
+    friendSearchNoMatch: false,
+    error: '',
+  });
 }
 
 async function loadHome() {
@@ -327,7 +338,7 @@ function renderFriendsPage() {
 
       <div class="card">
         <h2>Ajouter un ami</h2>
-        <input type="text" data-action="friend-search-input" placeholder="Rechercher un pseudo…" />
+        <input type="text" data-action="friend-search-input" placeholder="Rechercher un pseudo ou un email…" />
         ${S.friendSearchResults.length ? `
           <ul class="search-results">
             ${S.friendSearchResults.map((p) => `
@@ -339,7 +350,24 @@ function renderFriendsPage() {
             `).join('')}
           </ul>
         ` : ''}
+        ${S.friendSearchNoMatch ? `
+          <p class="muted">Personne n'a de compte avec cet email pour l'instant.</p>
+          <button data-action="invite-friend-by-email" data-email="${escapeHtml(S.friendSearchQuery)}">Inviter ${escapeHtml(S.friendSearchQuery)} par email</button>
+        ` : ''}
       </div>
+
+      ${S.pendingInvites.length ? `
+        <h2>Invitations en attente</h2>
+        <ul class="member-list">
+          ${S.pendingInvites.map((inv) => `
+            <li>
+              <span>${escapeHtml(inv.email)}</span>
+              <span class="badge muted">en attente</span>
+              <button class="icon-btn" data-action="cancel-friend-invite" data-id="${inv.id}">🗑</button>
+            </li>
+          `).join('')}
+        </ul>
+      ` : ''}
 
       ${categories.length ? categories.map((cat) => `
         <h2>${escapeHtml(cat)}</h2>
@@ -822,6 +850,12 @@ app.addEventListener('click', async (e) => {
     } else if (action === 'remove-friend') {
       await api.removeFriend(btn.dataset.id);
       await loadFriends();
+    } else if (action === 'invite-friend-by-email') {
+      await api.inviteFriendByEmail(btn.dataset.email, 'Général');
+      await loadFriends();
+    } else if (action === 'cancel-friend-invite') {
+      await api.cancelFriendInvite(btn.dataset.id);
+      await loadFriends();
     } else if (action === 'add-member-from-search') {
       await api.addMemberByProfile(S.list.id, btn.dataset.id, btn.dataset.name);
       setState({ memberSearchResults: [] });
@@ -853,6 +887,8 @@ app.addEventListener('change', async (e) => {
   }
 });
 
+const EMAIL_RE = /^\S+@\S+\.\S+$/;
+
 let searchDebounce = null;
 app.addEventListener('input', (e) => {
   const el = e.target.closest('[data-action="friend-search-input"], [data-action="member-search-input"]');
@@ -863,9 +899,19 @@ app.addEventListener('input', (e) => {
   clearTimeout(searchDebounce);
   searchDebounce = setTimeout(async () => {
     try {
-      const results = await api.searchProfiles(query);
-      if (isFriendSearch) setState({ friendSearchResults: results });
-      else setState({ memberSearchResults: results });
+      let patch;
+      if (isFriendSearch && EMAIL_RE.test(query.trim())) {
+        const profile = await api.findProfileByEmail(query.trim());
+        patch = profile
+          ? { friendSearchResults: [profile], friendSearchQuery: query, friendSearchNoMatch: false }
+          : { friendSearchResults: [], friendSearchQuery: query, friendSearchNoMatch: true };
+      } else {
+        const results = await api.searchProfiles(query);
+        patch = isFriendSearch
+          ? { friendSearchResults: results, friendSearchQuery: query, friendSearchNoMatch: false }
+          : { memberSearchResults: results };
+      }
+      setState(patch);
       // Le re-rendu complet recrée l'input : on restaure sa valeur, le focus et le curseur.
       const input = app.querySelector(`[data-action="${action}"]`);
       if (input) {

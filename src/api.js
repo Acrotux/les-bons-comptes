@@ -88,6 +88,7 @@ export async function claimInvites(email) {
     .update({ profile_id: user.id })
     .is('profile_id', null)
     .eq('email', email);
+  await supabase.rpc('claim_friend_invites');
 }
 
 // ---------- Amis ----------
@@ -97,6 +98,12 @@ export async function searchProfiles(query) {
   const { data, error } = await supabase.rpc('search_profiles', { query: query.trim() });
   if (error) throw error;
   return data;
+}
+
+export async function findProfileByEmail(email) {
+  const { data, error } = await supabase.rpc('find_profile_by_email', { p_email: email.trim() });
+  if (error) throw error;
+  return data?.[0] || null;
 }
 
 export async function listFriends() {
@@ -110,6 +117,25 @@ export async function addFriend(friendId, category) {
   const { error } = await supabase
     .from('friends')
     .upsert({ owner_id: user.id, friend_id: friendId, category: category || 'Général' }, { onConflict: 'owner_id,friend_id' });
+  if (error) throw error;
+}
+
+export async function listPendingFriendInvites() {
+  const { data, error } = await supabase.from('friend_invites').select('*').order('created_at');
+  if (error) throw error;
+  return data;
+}
+
+export async function inviteFriendByEmail(email, category) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase
+    .from('friend_invites')
+    .upsert({ owner_id: user.id, email: email.trim().toLowerCase(), category: category || 'Général' }, { onConflict: 'owner_id,email' });
+  if (error) throw error;
+}
+
+export async function cancelFriendInvite(inviteId) {
+  const { error } = await supabase.from('friend_invites').delete().eq('id', inviteId);
   if (error) throw error;
 }
 
