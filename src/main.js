@@ -8,7 +8,8 @@ const app = document.getElementById('app');
 const S = {
   session: null,
   profile: null,
-  view: 'loading', // loading | login | check-email | onboarding-name | home | list
+  view: 'loading', // loading | auth | confirm-email | reset-sent | onboarding-name | home | list
+  authMode: 'login', // login | signup | forgot
   pendingEmail: '',
   error: '',
   lists: [],
@@ -37,13 +38,13 @@ async function boot() {
   api.onAuthStateChange((session) => {
     S.session = session;
     if (session) afterLogin();
-    else setState({ view: 'login', profile: null });
+    else if (S.view !== 'reset-sent') setState({ view: 'auth', authMode: 'login', profile: null });
   });
   if (session) {
     S.session = session;
     await afterLogin();
   } else {
-    setState({ view: 'login' });
+    setState({ view: 'auth' });
   }
   window.addEventListener('hashchange', routeFromHash);
 }
@@ -105,8 +106,9 @@ async function refreshList(listId) {
 
 function render() {
   if (S.view === 'loading') app.innerHTML = `<div class="center-screen">Chargement…</div>`;
-  else if (S.view === 'login') app.innerHTML = renderLogin();
-  else if (S.view === 'check-email') app.innerHTML = renderCheckEmail();
+  else if (S.view === 'auth') app.innerHTML = renderAuth();
+  else if (S.view === 'confirm-email') app.innerHTML = renderConfirmEmail();
+  else if (S.view === 'reset-sent') app.innerHTML = renderResetSent();
   else if (S.view === 'onboarding-name') app.innerHTML = renderOnboarding();
   else if (S.view === 'home') app.innerHTML = renderTopbar() + renderHome();
   else if (S.view === 'list') app.innerHTML = renderTopbar() + renderList();
@@ -125,32 +127,91 @@ function renderTopbar() {
   `;
 }
 
+function renderAuth() {
+  if (S.authMode === 'signup') return renderSignup();
+  if (S.authMode === 'forgot') return renderForgot();
+  return renderLogin();
+}
+
 function renderLogin() {
   return `
     <div class="center-screen">
       <div class="card auth-card">
         <h1>🧾 Les Bons Comptes</h1>
-        <p class="muted">Connecte-toi avec ton email pour retrouver tes listes.</p>
+        <p class="muted">Connecte-toi pour retrouver tes listes.</p>
         ${S.error ? `<div class="banner error">${escapeHtml(S.error)}</div>` : ''}
-        <form data-action="request-otp">
+        <form data-action="login">
           <label>Adresse email</label>
           <input type="email" name="email" required placeholder="toi@exemple.com" />
-          <button type="submit">Recevoir un code</button>
+          <label>Mot de passe</label>
+          <input type="password" name="password" required />
+          <button type="submit">Se connecter</button>
         </form>
+        <button class="link-btn" data-action="show-signup">Créer un compte</button>
+        <button class="link-btn" data-action="show-forgot">Mot de passe oublié ?</button>
       </div>
     </div>
   `;
 }
 
-function renderCheckEmail() {
+function renderSignup() {
+  return `
+    <div class="center-screen">
+      <div class="card auth-card">
+        <h1>Créer un compte</h1>
+        ${S.error ? `<div class="banner error">${escapeHtml(S.error)}</div>` : ''}
+        <form data-action="signup">
+          <label>Pseudo</label>
+          <input type="text" name="name" required placeholder="Ex : Marie" />
+          <label>Adresse email</label>
+          <input type="email" name="email" required placeholder="toi@exemple.com" />
+          <label>Mot de passe</label>
+          <input type="password" name="password" required minlength="6" placeholder="6 caractères minimum" />
+          <button type="submit">Créer mon compte</button>
+        </form>
+        <button class="link-btn" data-action="show-login">J'ai déjà un compte</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderForgot() {
+  return `
+    <div class="center-screen">
+      <div class="card auth-card">
+        <h1>Mot de passe oublié</h1>
+        <p class="muted">Un lien de réinitialisation te sera envoyé par email.</p>
+        ${S.error ? `<div class="banner error">${escapeHtml(S.error)}</div>` : ''}
+        <form data-action="forgot-password">
+          <label>Adresse email</label>
+          <input type="email" name="email" required placeholder="toi@exemple.com" />
+          <button type="submit">Envoyer le lien</button>
+        </form>
+        <button class="link-btn" data-action="show-login">Retour à la connexion</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderConfirmEmail() {
   return `
     <div class="center-screen">
       <div class="card auth-card">
         <h1>Vérifie ta boîte mail</h1>
-        <p class="muted">Un lien de connexion à usage unique a été envoyé à <strong>${escapeHtml(S.pendingEmail)}</strong>. Ouvre cet email et clique sur le lien pour continuer — cette page se mettra à jour automatiquement.</p>
-        ${S.error ? `<div class="banner error">${escapeHtml(S.error)}</div>` : ''}
-        <button data-action="request-login-link-again">Renvoyer le lien</button>
-        <button class="link-btn" data-action="back-to-login">Changer d'adresse email</button>
+        <p class="muted">Un email de confirmation a été envoyé à <strong>${escapeHtml(S.pendingEmail)}</strong>. Clique sur le lien qu'il contient, puis reviens te connecter avec ton mot de passe.</p>
+        <button class="link-btn" data-action="show-login">Retour à la connexion</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderResetSent() {
+  return `
+    <div class="center-screen">
+      <div class="card auth-card">
+        <h1>Email envoyé</h1>
+        <p class="muted">Vérifie ta boîte mail et suis le lien pour choisir un nouveau mot de passe.</p>
+        <button class="link-btn" data-action="show-login">Retour à la connexion</button>
       </div>
     </div>
   `;
@@ -378,9 +439,23 @@ app.addEventListener('submit', async (e) => {
   const data = Object.fromEntries(new FormData(form).entries());
 
   try {
-    if (action === 'request-otp') {
-      await api.requestLoginLink(data.email);
-      setState({ view: 'check-email', pendingEmail: data.email, error: '' });
+    if (action === 'login') {
+      await api.signInWithPassword(data.email, data.password);
+      // onAuthStateChange déclenchera afterLogin()
+    } else if (action === 'signup') {
+      const { user, session } = await api.signUp(data.email, data.password);
+      if (session) {
+        S.session = session;
+        const profile = await api.ensureProfile(session.user, data.name);
+        S.profile = profile;
+        await api.claimInvites(session.user.email);
+        routeFromHash();
+      } else {
+        setState({ view: 'confirm-email', pendingEmail: data.email, error: '' });
+      }
+    } else if (action === 'forgot-password') {
+      await api.resetPassword(data.email);
+      setState({ view: 'reset-sent', error: '' });
     } else if (action === 'set-profile-name') {
       const profile = await api.ensureProfile(S.session.user, data.name);
       S.profile = profile;
@@ -414,11 +489,13 @@ app.addEventListener('click', async (e) => {
   try {
     if (action === 'logout') {
       await api.signOut();
-      setState({ view: 'login', session: null, profile: null });
-    } else if (action === 'back-to-login') {
-      setState({ view: 'login', error: '' });
-    } else if (action === 'request-login-link-again') {
-      await api.requestLoginLink(S.pendingEmail);
+      setState({ view: 'auth', authMode: 'login', session: null, profile: null });
+    } else if (action === 'show-login') {
+      setState({ view: 'auth', authMode: 'login', error: '' });
+    } else if (action === 'show-signup') {
+      setState({ view: 'auth', authMode: 'signup', error: '' });
+    } else if (action === 'show-forgot') {
+      setState({ view: 'auth', authMode: 'forgot', error: '' });
     } else if (action === 'copy-link') {
       await navigator.clipboard.writeText(location.href);
       setState({ error: '' });
