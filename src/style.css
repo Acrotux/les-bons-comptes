@@ -167,6 +167,8 @@ button:hover { opacity: 0.9; }
 .expense-form { display: grid; grid-template-columns: 9rem 1fr 8rem auto; gap: 0.5rem; margin-top: 0.75rem; }
 .add-member-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.5rem; margin-top: 0.75rem; }
 .inline-edit-form { display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 0.5rem; flex: 1; }
+.profile-chip .inline-edit-form { grid-template-columns: 10rem auto auto; align-items: center; }
+.profile-chip { flex-wrap: wrap; }
 
 @media (max-width: 640px) {
   .expense-form, .add-member-form, .inline-edit-form { grid-template-columns: 1fr; }

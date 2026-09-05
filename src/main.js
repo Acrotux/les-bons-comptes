@@ -19,6 +19,7 @@ const S = {
   settlements: [],
   unsubscribe: null,
   inlineEdit: null, // { type: 'member', id } | { type: 'confirm-remove-member', id }
+  editingProfile: false,
 };
 
 function setState(patch) {
@@ -115,11 +116,21 @@ function render() {
 }
 
 function renderTopbar() {
+  const profileArea = S.editingProfile ? `
+    <form data-action="update-profile-name" class="inline-edit-form">
+      <input type="text" name="name" value="${escapeHtml(S.profile?.display_name || '')}" required class="inline-edit-input" />
+      <button type="submit">OK</button>
+      <button type="button" data-action="cancel-edit-profile">Annuler</button>
+    </form>
+  ` : `
+    <span>${escapeHtml(S.profile?.display_name || '')}</span>
+    <button class="icon-btn" data-action="toggle-edit-profile">✎</button>
+  `;
   return `
     <div class="topbar">
       <a href="#/" class="brand">🧾 Les Bons Comptes</a>
       <div class="profile-chip">
-        <span>${escapeHtml(S.profile?.display_name || '')}</span>
+        ${profileArea}
         <button data-action="logout">Se déconnecter</button>
       </div>
     </div>
@@ -475,6 +486,10 @@ app.addEventListener('submit', async (e) => {
       const id = form.dataset.id;
       await api.updateMember(id, data.name, data.email);
       setState({ inlineEdit: null });
+    } else if (action === 'update-profile-name') {
+      await api.updateProfileName(S.session.user.id, data.name);
+      S.profile = { ...S.profile, display_name: data.name };
+      setState({ editingProfile: false });
     }
   } catch (err) {
     setState({ error: friendlyError(err) });
@@ -496,6 +511,10 @@ app.addEventListener('click', async (e) => {
       setState({ view: 'auth', authMode: 'signup', error: '' });
     } else if (action === 'show-forgot') {
       setState({ view: 'auth', authMode: 'forgot', error: '' });
+    } else if (action === 'toggle-edit-profile') {
+      setState({ editingProfile: true });
+    } else if (action === 'cancel-edit-profile') {
+      setState({ editingProfile: false });
     } else if (action === 'copy-link') {
       await navigator.clipboard.writeText(location.href);
       setState({ error: '' });
