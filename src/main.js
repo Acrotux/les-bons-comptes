@@ -19,6 +19,7 @@ const S = {
   homeTab: 'apercu',
   overview: { totalToReimburse: 0, totalReimbursed: 0, debtorsCount: 0 },
   list: null,
+  listTab: 'apercu',
   members: [],
   memberProfiles: {}, // profile_id -> { display_name, avatar_url }
   memberSearchResults: [],
@@ -132,7 +133,7 @@ async function openList(listId) {
     ]);
     const memberProfiles = Object.fromEntries(memberProfilesArr.map((p) => [p.profile_id, p]));
     S.unsubscribe = api.subscribeToList(listId, () => refreshList(listId));
-    setState({ view: 'list', list, members, expenses, settlements, memberProfiles, memberSearchResults: [] });
+    setState({ view: 'list', list, members, expenses, settlements, memberProfiles, memberSearchResults: [], listTab: 'apercu' });
     location.hash = `#/list/${listId}`;
   } catch (e) {
     setState({ view: 'home', error: "Liste introuvable ou accès non autorisé." });
@@ -471,8 +472,96 @@ function renderList() {
   const myMember = S.members.find((m) => m.profile_id === uid);
   const isMember = !!myMember;
 
-  const { total, shares, paid, balances, memberIds } = computeBalances(S.members, S.expenses, S.settlements);
+  const { total, balances, memberIds } = computeBalances(S.members, S.expenses, S.settlements);
+  const { balances: grossBalances } = computeBalances(S.members, S.expenses, []);
   const transactions = computeTransactions(balances, memberIds);
+
+  const listTabs = [
+    { key: 'apercu', label: '📊 Aperçu' },
+    { key: 'participants', label: 'Participants' },
+    { key: 'depenses', label: 'Dépenses' },
+    { key: 'soldes', label: 'Soldes' },
+    { key: 'remboursements', label: 'Remboursements suggérés' },
+  ];
+  const activeTab = listTabs.some((t) => t.key === S.listTab) ? S.listTab : 'apercu';
+
+  let tabContent;
+  if (activeTab === 'apercu') {
+    tabContent = renderListOverview(memberIds, balances, grossBalances);
+  } else if (activeTab === 'participants') {
+    tabContent = `
+      <div class="card">
+        <h2>Participants</h2>
+        <ul class="member-list">
+          ${S.members.map((m) => renderMember(m, isCreator)).join('')}
+        </ul>
+        <form data-action="add-member" class="add-member-form">
+          <input type="text" name="name" required placeholder="Nom du participant" />
+          <input type="email" name="email" placeholder="Email (optionnel)" />
+          <button type="submit">Ajouter</button>
+        </form>
+        <p class="muted">Ou invite quelqu'un qui a déjà un compte :</p>
+        <input type="text" data-action="member-search-input" placeholder="Rechercher un pseudo…" />
+        ${S.memberSearchResults.length ? `
+          <ul class="search-results">
+            ${S.memberSearchResults.map((p) => `
+              <li>
+                ${p.avatar_url ? `<img class="avatar-mini" src="${escapeHtml(p.avatar_url)}" alt="" />` : `<span class="avatar-mini avatar-placeholder">${escapeHtml(p.display_name[0].toUpperCase())}</span>`}
+                <span>${escapeHtml(p.display_name)}</span>
+                <button data-action="add-member-from-search" data-id="${p.id}" data-name="${escapeHtml(p.display_name)}">Ajouter</button>
+              </li>
+            `).join('')}
+          </ul>
+        ` : ''}
+      </div>
+    `;
+  } else if (activeTab === 'depenses') {
+    tabContent = `
+      <div class="card">
+        <h2>Dépenses <span class="muted">(total ${formatCents(total)})</span></h2>
+        <ul class="expense-list">
+          ${S.expenses.map((e) => renderExpense(e, uid, isCreator)).join('') || '<p class="muted">Aucune dépense pour l\'instant.</p>'}
+        </ul>
+        ${isMember ? `
+          <form data-action="add-expense" class="expense-form">
+            <select name="memberId" class="payer-select">
+              ${S.members.map((m) => `<option value="${m.id}">${escapeHtml(m.display_name)}</option>`).join('')}
+            </select>
+            <input type="text" name="label" required placeholder="Libellé (ex : Courses)" />
+            <input type="number" name="amount" required min="0.01" step="0.01" placeholder="Montant €" />
+            <button type="submit">Ajouter</button>
+          </form>
+        ` : ''}
+      </div>
+    `;
+  } else if (activeTab === 'soldes') {
+    tabContent = `
+      <div class="card">
+        <h2>Soldes</h2>
+        <ul class="balance-list">
+          ${memberIds.map((id) => renderBalance(id, balances[id])).join('')}
+        </ul>
+      </div>
+    `;
+  } else {
+    tabContent = `
+      <div class="card">
+        <h2>Remboursements suggérés</h2>
+        ${transactions.length ? `<ul class="tx-list">${transactions.map((t) => renderTransaction(t, myMember)).join('')}</ul>` : '<p class="muted">Tout le monde est à jour 🎉</p>'}
+        ${renderPendingSettlements(myMember)}
+        ${isMember ? `
+          <h3>Déclarer un remboursement (montant libre, aussi partiel)</h3>
+          <form data-action="declare-custom-settlement" class="custom-settlement-form">
+            <select name="toMemberId">
+              ${S.members.filter((m) => m.id !== myMember.id).map((m) => `<option value="${m.id}">${escapeHtml(m.display_name)}</option>`).join('')}
+            </select>
+            <input type="number" name="amount" required min="0.01" step="0.01" placeholder="Montant €" />
+            <button type="submit">J'ai remboursé</button>
+          </form>
+        ` : ''}
+      </div>
+    `;
+  }
 
   return `
     <div class="page">
@@ -502,70 +591,41 @@ function renderList() {
         </div>
       ` : ''}
 
-      <div class="card">
-        <h2>Participants</h2>
-        <ul class="member-list">
-          ${S.members.map((m) => renderMember(m, isCreator)).join('')}
-        </ul>
-        <form data-action="add-member" class="add-member-form">
-          <input type="text" name="name" required placeholder="Nom du participant" />
-          <input type="email" name="email" placeholder="Email (optionnel)" />
-          <button type="submit">Ajouter</button>
-        </form>
-        <p class="muted">Ou invite quelqu'un qui a déjà un compte :</p>
-        <input type="text" data-action="member-search-input" placeholder="Rechercher un pseudo…" />
-        ${S.memberSearchResults.length ? `
-          <ul class="search-results">
-            ${S.memberSearchResults.map((p) => `
-              <li>
-                ${p.avatar_url ? `<img class="avatar-mini" src="${escapeHtml(p.avatar_url)}" alt="" />` : `<span class="avatar-mini avatar-placeholder">${escapeHtml(p.display_name[0].toUpperCase())}</span>`}
-                <span>${escapeHtml(p.display_name)}</span>
-                <button data-action="add-member-from-search" data-id="${p.id}" data-name="${escapeHtml(p.display_name)}">Ajouter</button>
-              </li>
-            `).join('')}
-          </ul>
-        ` : ''}
+      <div class="tabs">
+        ${listTabs.map((t) => `<button class="tab ${t.key === activeTab ? 'active' : ''}" data-action="switch-list-tab" data-tab="${t.key}">${escapeHtml(t.label)}</button>`).join('')}
       </div>
 
-      <div class="card">
-        <h2>Dépenses <span class="muted">(total ${formatCents(total)})</span></h2>
-        <ul class="expense-list">
-          ${S.expenses.map((e) => renderExpense(e, uid, isCreator)).join('') || '<p class="muted">Aucune dépense pour l\'instant.</p>'}
-        </ul>
-        ${isMember ? `
-          <form data-action="add-expense" class="expense-form">
-            <select name="memberId" class="payer-select">
-              ${S.members.map((m) => `<option value="${m.id}">${escapeHtml(m.display_name)}</option>`).join('')}
-            </select>
-            <input type="text" name="label" required placeholder="Libellé (ex : Courses)" />
-            <input type="number" name="amount" required min="0.01" step="0.01" placeholder="Montant €" />
-            <button type="submit">Ajouter</button>
-          </form>
-        ` : ''}
-      </div>
+      ${tabContent}
+    </div>
+  `;
+}
 
-      <div class="card">
-        <h2>Soldes</h2>
-        <ul class="balance-list">
-          ${memberIds.map((id) => renderBalance(id, balances[id])).join('')}
-        </ul>
-      </div>
+function renderListOverview(memberIds, balances, grossBalances) {
+  let totalToReimburse = 0;
+  let alreadyReimbursed = 0;
+  let debtorsCount = 0;
+  let settledDebtorsCount = 0;
 
-      <div class="card">
-        <h2>Remboursements suggérés</h2>
-        ${transactions.length ? `<ul class="tx-list">${transactions.map((t) => renderTransaction(t, myMember)).join('')}</ul>` : '<p class="muted">Tout le monde est à jour 🎉</p>'}
-        ${renderPendingSettlements(myMember)}
-        ${isMember ? `
-          <h3>Déclarer un remboursement (montant libre, aussi partiel)</h3>
-          <form data-action="declare-custom-settlement" class="custom-settlement-form">
-            <select name="toMemberId">
-              ${S.members.filter((m) => m.id !== myMember.id).map((m) => `<option value="${m.id}">${escapeHtml(m.display_name)}</option>`).join('')}
-            </select>
-            <input type="number" name="amount" required min="0.01" step="0.01" placeholder="Montant €" />
-            <button type="submit">J'ai remboursé</button>
-          </form>
-        ` : ''}
-      </div>
+  for (const id of memberIds) {
+    if (grossBalances[id] > 0) totalToReimburse += grossBalances[id];
+    if (balances[id] < 0) debtorsCount += 1;
+    if (grossBalances[id] < 0 && balances[id] >= 0) settledDebtorsCount += 1;
+  }
+  for (const s of S.settlements) {
+    if (s.confirmed_at) alreadyReimbursed += s.amount_cents;
+  }
+  const remaining = Math.max(0, totalToReimburse - alreadyReimbursed);
+
+  const tile = (value, label) => `<div class="card stat-tile"><div class="stat-value">${value}</div><div class="stat-label">${label}</div></div>`;
+
+  return `
+    <div class="stat-grid">
+      ${tile(formatCents(totalToReimburse), 'Montant total à rembourser')}
+      ${tile(formatCents(remaining), 'Montant restant à rembourser')}
+      ${tile(formatCents(alreadyReimbursed), 'Montant déjà remboursé')}
+      ${tile(memberIds.length, 'Participants dans la liste')}
+      ${tile(debtorsCount, "N'ont pas encore remboursé leurs dettes")}
+      ${tile(settledDebtorsCount, 'Ont remboursé leurs dettes')}
     </div>
   `;
 }
@@ -814,6 +874,8 @@ app.addEventListener('click', async (e) => {
       setState({ memberSearchResults: [] });
     } else if (action === 'switch-home-tab') {
       setState({ homeTab: btn.dataset.tab });
+    } else if (action === 'switch-list-tab') {
+      setState({ listTab: btn.dataset.tab });
     }
   } catch (err) {
     setState({ error: friendlyError(err) });
