@@ -331,14 +331,21 @@ function renderFriendsPage() {
     (grouped[f.category] ||= []).push(f);
   }
   const categories = Object.keys(grouped).sort();
+  const ownCategories = [...new Set(S.friends.map((f) => f.category))].sort();
 
   return `
     <div class="page">
       <h1>Mes amis</h1>
 
+      <datalist id="friend-category-options">
+        ${ownCategories.map((c) => `<option value="${escapeHtml(c)}"></option>`).join('')}
+      </datalist>
+
       <div class="card">
         <h2>Ajouter un ami</h2>
         <input type="text" data-action="friend-search-input" placeholder="Rechercher un pseudo ou un email…" />
+        <label class="muted">Catégorie pour ce nouvel ami (optionnel, tu peux créer la tienne)</label>
+        <input type="text" id="new-friend-category" list="friend-category-options" placeholder="Ex : Famille, Collègues, Rugby…" />
         ${S.friendSearchResults.length ? `
           <ul class="search-results">
             ${S.friendSearchResults.map((p) => `
@@ -376,9 +383,7 @@ function renderFriendsPage() {
             <li>
               ${f.avatar_url ? `<img class="avatar-mini" src="${escapeHtml(f.avatar_url)}" alt="" />` : `<span class="avatar-mini avatar-placeholder">${escapeHtml(f.display_name[0].toUpperCase())}</span>`}
               <span>${escapeHtml(f.display_name)}</span>
-              <select data-action="update-friend-category" data-id="${f.id}">
-                ${CATEGORIES.map((c) => `<option value="${c}" ${c === f.category ? 'selected' : ''}>${c}</option>`).join('')}
-              </select>
+              <input type="text" list="friend-category-options" data-action="update-friend-category" data-id="${f.id}" value="${escapeHtml(f.category)}" />
               <button class="icon-btn" data-action="remove-friend" data-id="${f.id}">🗑</button>
             </li>
           `).join('')}
@@ -845,13 +850,15 @@ app.addEventListener('click', async (e) => {
     } else if (action === 'confirm-settlement') {
       await api.confirmSettlement(btn.dataset.id);
     } else if (action === 'add-friend') {
-      await api.addFriend(btn.dataset.id, 'Général');
+      const category = app.querySelector('#new-friend-category')?.value.trim();
+      await api.addFriend(btn.dataset.id, category);
       await loadFriends();
     } else if (action === 'remove-friend') {
       await api.removeFriend(btn.dataset.id);
       await loadFriends();
     } else if (action === 'invite-friend-by-email') {
-      await api.inviteFriendByEmail(btn.dataset.email, 'Général');
+      const category = app.querySelector('#new-friend-category')?.value.trim();
+      await api.inviteFriendByEmail(btn.dataset.email, category);
       await loadFriends();
     } else if (action === 'cancel-friend-invite') {
       await api.cancelFriendInvite(btn.dataset.id);
