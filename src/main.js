@@ -16,8 +16,7 @@ const S = {
   error: '',
   profileNotice: '',
   lists: [],
-  homeTab: 'apercu',
-  overview: { totalToReimburse: 0, totalReimbursed: 0, debtorsCount: 0 },
+  homeTab: 'toutes',
   list: null,
   listTab: 'apercu',
   members: [],
@@ -93,32 +92,7 @@ async function loadFriends() {
 async function loadHome() {
   if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
   const lists = await api.fetchMyLists();
-  const overview = await computeOverview(lists);
-  setState({ view: 'home', lists, list: null, overview });
-}
-
-async function computeOverview(lists) {
-  let totalToReimburse = 0;
-  let totalReimbursed = 0;
-  let debtorsCount = 0;
-
-  await Promise.all(lists.map(async (list) => {
-    const [members, expenses, settlements] = await Promise.all([
-      api.getMembers(list.id),
-      api.getExpenses(list.id),
-      api.getSettlements(list.id),
-    ]);
-    const { balances } = computeBalances(members, expenses, settlements);
-    for (const id of Object.keys(balances)) {
-      if (balances[id] > 0) totalToReimburse += balances[id];
-      if (balances[id] < 0) debtorsCount += 1;
-    }
-    for (const s of settlements) {
-      if (s.confirmed_at) totalReimbursed += s.amount_cents;
-    }
-  }));
-
-  return { totalToReimburse, totalReimbursed, debtorsCount };
+  setState({ view: 'home', lists, list: null });
 }
 
 async function openList(listId) {
@@ -390,12 +364,11 @@ function renderHome() {
   const usedCategories = [...new Set(S.lists.map((l) => l.category).filter(Boolean))].sort();
   const hasUncategorized = S.lists.some((l) => !l.category);
   const tabs = [
-    { key: 'apercu', label: '📊 Aperçu' },
     { key: 'toutes', label: 'Toutes' },
     ...usedCategories.map((c) => ({ key: c, label: c })),
     ...(hasUncategorized ? [{ key: '__none__', label: 'Sans catégorie' }] : []),
   ];
-  const activeTab = tabs.some((t) => t.key === S.homeTab) ? S.homeTab : 'apercu';
+  const activeTab = tabs.some((t) => t.key === S.homeTab) ? S.homeTab : 'toutes';
 
   const listCard = (l) => `
     <a class="card list-card" href="#/list/${l.id}">
@@ -408,38 +381,18 @@ function renderHome() {
     </a>
   `;
 
-  let tabContent;
-  if (activeTab === 'apercu') {
-    tabContent = `
-      <div class="stat-grid">
-        <div class="card stat-tile">
-          <div class="stat-value">${formatCents(S.overview.totalToReimburse)}</div>
-          <div class="stat-label">Montant total à rembourser</div>
-        </div>
-        <div class="card stat-tile">
-          <div class="stat-value">${formatCents(S.overview.totalReimbursed)}</div>
-          <div class="stat-label">Montant déjà remboursé</div>
-        </div>
-        <div class="card stat-tile">
-          <div class="stat-value">${S.overview.debtorsCount}</div>
-          <div class="stat-label">Participant(s) n'ayant pas encore remboursé leurs dettes</div>
-        </div>
-      </div>
-    `;
-  } else {
-    const filtered = activeTab === 'toutes'
-      ? S.lists
-      : activeTab === '__none__'
-        ? S.lists.filter((l) => !l.category)
-        : S.lists.filter((l) => l.category === activeTab);
-    const open = filtered.filter((l) => l.status === 'open');
-    const closed = filtered.filter((l) => l.status === 'closed');
-    tabContent = `
-      <h2>Listes en cours</h2>
-      <div class="list-grid">${open.length ? open.map(listCard).join('') : '<p class="muted">Aucune liste en cours.</p>'}</div>
-      ${closed.length ? `<h2>Historique</h2><div class="list-grid">${closed.map(listCard).join('')}</div>` : ''}
-    `;
-  }
+  const filtered = activeTab === 'toutes'
+    ? S.lists
+    : activeTab === '__none__'
+      ? S.lists.filter((l) => !l.category)
+      : S.lists.filter((l) => l.category === activeTab);
+  const open = filtered.filter((l) => l.status === 'open');
+  const closed = filtered.filter((l) => l.status === 'closed');
+  const tabContent = `
+    <h2>Listes en cours</h2>
+    <div class="list-grid">${open.length ? open.map(listCard).join('') : '<p class="muted">Aucune liste en cours.</p>'}</div>
+    ${closed.length ? `<h2>Historique</h2><div class="list-grid">${closed.map(listCard).join('')}</div>` : ''}
+  `;
 
   return `
     <div class="page">
