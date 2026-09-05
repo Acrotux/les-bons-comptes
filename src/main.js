@@ -358,7 +358,7 @@ function renderFriendsPage() {
           </ul>
         ` : ''}
         ${S.friendSearchNoMatch ? `
-          <p class="muted">Personne n'a de compte avec cet email pour l'instant.</p>
+          <p class="muted">Personne n'a de compte avec cet email pour l'instant. En l'invitant, ton client mail s'ouvrira avec un message prêt à envoyer.</p>
           <button data-action="invite-friend-by-email" data-email="${escapeHtml(S.friendSearchQuery)}">Inviter ${escapeHtml(S.friendSearchQuery)} par email</button>
         ` : ''}
       </div>
@@ -858,7 +858,14 @@ app.addEventListener('click', async (e) => {
       await loadFriends();
     } else if (action === 'invite-friend-by-email') {
       const category = app.querySelector('#new-friend-category')?.value.trim();
-      await api.inviteFriendByEmail(btn.dataset.email, category);
+      const email = btn.dataset.email;
+      await api.inviteFriendByEmail(email, category);
+      const appUrl = window.location.origin + import.meta.env.BASE_URL;
+      const subject = encodeURIComponent('Invitation à rejoindre Les Bons Comptes');
+      const body = encodeURIComponent(
+        `Salut !\n\n${S.profile.display_name} t'invite à rejoindre "Les Bons Comptes" pour gérer vos dépenses partagées.\n\nCrée ton compte ici : ${appUrl}\n\nUtilise bien cette adresse email (${email}) à l'inscription pour être automatiquement ajouté à sa liste d'amis.`
+      );
+      window.location.href = `mailto:${encodeURIComponent(email)}?subject=${subject}&body=${body}`;
       await loadFriends();
     } else if (action === 'cancel-friend-invite') {
       await api.cancelFriendInvite(btn.dataset.id);
