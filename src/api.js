@@ -86,6 +86,12 @@ export async function updatePassword(newPassword) {
   if (error) throw error;
 }
 
+export async function deleteAccount() {
+  const { data, error } = await supabase.functions.invoke('delete-account');
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+}
+
 // Rattache automatiquement les invitations (participants placeholder) faites à mon email.
 export async function claimInvites(email) {
   const { data: { user } } = await supabase.auth.getUser();

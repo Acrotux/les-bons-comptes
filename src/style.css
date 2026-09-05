@@ -237,6 +237,9 @@ button:hover { opacity: 0.9; }
   .custom-settlement-form { grid-template-columns: 1fr; }
 }
 
+.danger-zone { border-color: var(--danger); }
+.danger-btn { background: var(--danger); }
+
 .banner.notice {
   background: color-mix(in srgb, var(--credit) 15%, transparent);
   border: 1px solid var(--credit);

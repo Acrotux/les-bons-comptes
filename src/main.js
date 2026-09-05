@@ -15,6 +15,7 @@ const S = {
   pendingEmail: '',
   error: '',
   profileNotice: '',
+  confirmDeleteAccount: false,
   lists: [],
   pendingListInvites: [],
   homeTab: 'toutes',
@@ -154,6 +155,7 @@ function render() {
   else if (S.view === 'auth') app.innerHTML = renderAuth();
   else if (S.view === 'confirm-email') app.innerHTML = renderConfirmEmail();
   else if (S.view === 'reset-sent') app.innerHTML = renderResetSent();
+  else if (S.view === 'account-deleted') app.innerHTML = renderAccountDeleted();
   else if (S.view === 'onboarding-name') app.innerHTML = renderOnboarding();
   else if (S.view === 'profile') app.innerHTML = renderTopbar() + renderProfilePage();
   else if (S.view === 'friends') app.innerHTML = renderTopbar() + renderFriendsPage();
@@ -266,6 +268,18 @@ function renderResetSent() {
   `;
 }
 
+function renderAccountDeleted() {
+  return `
+    <div class="center-screen">
+      <div class="card auth-card">
+        <h1>Compte supprimé</h1>
+        <p class="muted">Ton compte a été anonymisé et la connexion définitivement bloquée. Merci d'avoir utilisé Les Bons Comptes.</p>
+        <button class="link-btn" data-action="show-login">Retour à l'accueil</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderOnboarding() {
   return `
     <div class="center-screen">
@@ -324,6 +338,21 @@ function renderProfilePage() {
           <input type="password" name="password" required minlength="8" placeholder="Nouveau mot de passe (8 caractères min.)" />
           <button type="submit">Changer le mot de passe</button>
         </form>
+      </div>
+
+      <div class="card danger-zone">
+        <h2>Zone dangereuse</h2>
+        ${S.confirmDeleteAccount ? `
+          <p>Cette action est irréversible : ton profil sera anonymisé, tes amis et invitations supprimés, et la connexion à ce compte définitivement bloquée. Les dépenses déjà enregistrées resteront visibles aux autres participants, sans ton nom.</p>
+          <form data-action="delete-account-confirm">
+            <label>Tape SUPPRIMER pour confirmer</label>
+            <input type="text" name="confirmation" required placeholder="SUPPRIMER" />
+            <button type="submit" class="danger-btn">Supprimer définitivement mon compte</button>
+            <button type="button" data-action="cancel-delete-account">Annuler</button>
+          </form>
+        ` : `
+          <button data-action="ask-delete-account" class="danger-btn">Supprimer mon compte</button>
+        `}
       </div>
 
       <a class="link-btn" href="#/">&larr; Retour</a>
@@ -831,6 +860,14 @@ app.addEventListener('submit', async (e) => {
       const cents = Math.round(parseFloat(data.amount) * 100);
       await api.declareSettlement(S.list.id, myMember.id, data.toMemberId, cents);
       form.reset();
+    } else if (action === 'delete-account-confirm') {
+      if (data.confirmation !== 'SUPPRIMER') {
+        setState({ error: 'Tape exactement SUPPRIMER pour confirmer.' });
+      } else {
+        await api.deleteAccount();
+        await api.signOut();
+        setState({ view: 'account-deleted', session: null, profile: null, confirmDeleteAccount: false });
+      }
     }
   } catch (err) {
     setState({ error: friendlyError(err) });
@@ -910,6 +947,10 @@ app.addEventListener('click', async (e) => {
       setState({ homeTab: btn.dataset.tab });
     } else if (action === 'switch-list-tab') {
       setState({ listTab: btn.dataset.tab });
+    } else if (action === 'ask-delete-account') {
+      setState({ confirmDeleteAccount: true });
+    } else if (action === 'cancel-delete-account') {
+      setState({ confirmDeleteAccount: false, error: '' });
     }
   } catch (err) {
     setState({ error: friendlyError(err) });
