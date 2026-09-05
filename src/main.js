@@ -483,13 +483,12 @@ function renderList() {
           ${S.members.map((m) => renderMember(m, isCreator)).join('')}
         </ul>
         <form data-action="add-member" class="add-member-form">
-          <input type="text" name="name" required placeholder="Nom du participant" />
+          <input type="text" name="name" required placeholder="Nom ou pseudo du participant" data-action="member-search-input" />
           <input type="email" name="email" placeholder="Email (optionnel)" />
-          <button type="submit">Ajouter</button>
+          <button type="submit">Ajouter comme nouveau</button>
         </form>
-        <p class="muted">Ou invite quelqu'un qui a déjà un compte :</p>
-        <input type="text" data-action="member-search-input" placeholder="Rechercher un pseudo…" />
         ${S.memberSearchResults.length ? `
+          <p class="muted">Ce pseudo existe déjà — ajoute directement cette personne :</p>
           <ul class="search-results">
             ${S.memberSearchResults.map((p) => `
               <li>
