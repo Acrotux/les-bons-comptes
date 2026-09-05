@@ -16,6 +16,7 @@ const S = {
   error: '',
   profileNotice: '',
   lists: [],
+  pendingListInvites: [],
   homeTab: 'toutes',
   list: null,
   listTab: 'apercu',
@@ -111,8 +112,8 @@ async function loadFriends() {
 
 async function loadHome() {
   if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
-  const lists = await api.fetchMyLists();
-  setState({ view: 'home', lists, list: null });
+  const [lists, pendingListInvites] = await Promise.all([api.fetchMyLists(), api.getPendingListInvites()]);
+  setState({ view: 'home', lists, pendingListInvites, list: null });
 }
 
 async function openList(listId) {
@@ -434,6 +435,22 @@ function renderHome() {
 
   return `
     <div class="page">
+      ${S.pendingListInvites.length ? `
+        <div class="card">
+          <h2>Invitations à rejoindre une liste</h2>
+          <ul class="member-list">
+            ${S.pendingListInvites.map((inv) => `
+              <li>
+                <span>${escapeHtml(inv.list_name)}</span>
+                <span class="muted">invité par ${escapeHtml(inv.invited_by_name || '?')}</span>
+                <button data-action="accept-list-invite" data-id="${inv.member_id}">Accepter</button>
+                <button class="icon-btn" data-action="decline-list-invite" data-id="${inv.member_id}">Refuser</button>
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+      ` : ''}
+
       <div class="card">
         <h2>Nouvelle liste</h2>
         <form data-action="create-list" class="create-list-form">
@@ -460,7 +477,8 @@ function renderList() {
   const list = S.list;
   const uid = S.session.user.id;
   const isCreator = list.created_by === uid;
-  const myMember = S.members.find((m) => m.profile_id === uid);
+  const myPendingInvite = S.members.find((m) => m.profile_id === uid && m.status === 'invited');
+  const myMember = S.members.find((m) => m.profile_id === uid && m.status === 'active');
   const isMember = !!myMember;
 
   const { total, balances, memberIds } = computeBalances(S.members, S.expenses, S.settlements);
@@ -574,7 +592,13 @@ function renderList() {
 
       ${list.status === 'closed' ? renderSummaryMailto(list, memberIds, balances) : ''}
 
-      ${!isMember && !list.is_private ? `
+      ${myPendingInvite ? `
+        <div class="card">
+          <p>Tu as été invité à rejoindre cette liste.</p>
+          <button data-action="accept-list-invite" data-id="${myPendingInvite.id}">Accepter</button>
+          <button data-action="decline-list-invite" data-id="${myPendingInvite.id}">Refuser</button>
+        </div>
+      ` : !isMember && !list.is_private ? `
         <div class="card">
           <p>Tu n'es pas encore participant de cette liste.</p>
           <button data-action="join-list">Rejoindre la liste</button>
@@ -673,6 +697,7 @@ function renderMember(m, isCreator) {
       ${renderMemberAvatar(m)}
       <span>${escapeHtml(m.display_name)}</span>
       ${!m.profile_id ? '<span class="badge muted">en attente</span>' : ''}
+      ${m.profile_id && m.status === 'invited' ? '<span class="badge muted">invité·e, pas encore accepté</span>' : ''}
       ${m.email ? `<a class="mail-link" href="mailto:${escapeHtml(m.email)}">✉</a>` : '<span class="badge muted">pas d\'e-mail</span>'}
       ${isCreator ? `<button class="icon-btn" data-action="edit-member" data-id="${m.id}">✎</button>` : ''}
       ${isCreator ? `<button class="icon-btn" data-action="remove-member" data-id="${m.id}">🗑</button>` : ''}
@@ -875,6 +900,12 @@ app.addEventListener('click', async (e) => {
     } else if (action === 'add-member-from-search') {
       await api.addMemberByProfile(S.list.id, btn.dataset.id, btn.dataset.name);
       setState({ memberSearchResults: [] });
+    } else if (action === 'accept-list-invite') {
+      await api.acceptListInvite(btn.dataset.id);
+      await loadHome();
+    } else if (action === 'decline-list-invite') {
+      await api.declineListInvite(btn.dataset.id);
+      await loadHome();
     } else if (action === 'switch-home-tab') {
       setState({ homeTab: btn.dataset.tab });
     } else if (action === 'switch-list-tab') {

@@ -241,7 +241,8 @@ export async function addMember(listId, displayName, email) {
   if (error) throw error;
 }
 
-// Ajoute directement un utilisateur existant (trouvé par recherche de pseudo), déjà rattaché.
+// Invite un utilisateur existant (trouvé par recherche de pseudo) — en attente jusqu'à ce
+// qu'il accepte, pour ne pas l'exposer aux autres participants sans son accord.
 export async function addMemberByProfile(listId, friendProfileId, displayName) {
   const { data: { user } } = await supabase.auth.getUser();
   const { error } = await supabase.from('list_members').insert({
@@ -249,7 +250,24 @@ export async function addMemberByProfile(listId, friendProfileId, displayName) {
     profile_id: friendProfileId,
     display_name: displayName,
     added_by: user.id,
+    status: 'invited',
   });
+  if (error) throw error;
+}
+
+export async function getPendingListInvites() {
+  const { data, error } = await supabase.rpc('my_pending_list_invites');
+  if (error) throw error;
+  return data;
+}
+
+export async function acceptListInvite(memberId) {
+  const { error } = await supabase.from('list_members').update({ status: 'active' }).eq('id', memberId);
+  if (error) throw error;
+}
+
+export async function declineListInvite(memberId) {
+  const { error } = await supabase.from('list_members').delete().eq('id', memberId);
   if (error) throw error;
 }
 
