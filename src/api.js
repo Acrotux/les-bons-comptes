@@ -11,15 +11,12 @@ export function onAuthStateChange(cb) {
   return supabase.auth.onAuthStateChange((_event, session) => cb(session));
 }
 
-export async function requestOtp(email) {
-  const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+export async function requestLoginLink(email) {
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: true, emailRedirectTo: window.location.origin + import.meta.env.BASE_URL },
+  });
   if (error) throw error;
-}
-
-export async function verifyOtp(email, token) {
-  const { data, error } = await supabase.auth.verifyOtp({ email, token, type: 'email' });
-  if (error) throw error;
-  return data.session;
 }
 
 export async function signOut() {

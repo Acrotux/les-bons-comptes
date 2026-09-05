@@ -8,7 +8,7 @@ const app = document.getElementById('app');
 const S = {
   session: null,
   profile: null,
-  view: 'loading', // loading | login | otp | onboarding-name | home | list
+  view: 'loading', // loading | login | check-email | onboarding-name | home | list
   pendingEmail: '',
   error: '',
   lists: [],
@@ -106,7 +106,7 @@ async function refreshList(listId) {
 function render() {
   if (S.view === 'loading') app.innerHTML = `<div class="center-screen">Chargement…</div>`;
   else if (S.view === 'login') app.innerHTML = renderLogin();
-  else if (S.view === 'otp') app.innerHTML = renderOtp();
+  else if (S.view === 'check-email') app.innerHTML = renderCheckEmail();
   else if (S.view === 'onboarding-name') app.innerHTML = renderOnboarding();
   else if (S.view === 'home') app.innerHTML = renderTopbar() + renderHome();
   else if (S.view === 'list') app.innerHTML = renderTopbar() + renderList();
@@ -142,18 +142,14 @@ function renderLogin() {
   `;
 }
 
-function renderOtp() {
+function renderCheckEmail() {
   return `
     <div class="center-screen">
       <div class="card auth-card">
-        <h1>Vérifie ton email</h1>
-        <p class="muted">Un code à usage unique a été envoyé à <strong>${escapeHtml(S.pendingEmail)}</strong>.</p>
+        <h1>Vérifie ta boîte mail</h1>
+        <p class="muted">Un lien de connexion à usage unique a été envoyé à <strong>${escapeHtml(S.pendingEmail)}</strong>. Ouvre cet email et clique sur le lien pour continuer — cette page se mettra à jour automatiquement.</p>
         ${S.error ? `<div class="banner error">${escapeHtml(S.error)}</div>` : ''}
-        <form data-action="verify-otp">
-          <label>Code reçu par email</label>
-          <input type="text" name="token" inputmode="numeric" required placeholder="123456" />
-          <button type="submit">Valider</button>
-        </form>
+        <button data-action="request-login-link-again">Renvoyer le lien</button>
         <button class="link-btn" data-action="back-to-login">Changer d'adresse email</button>
       </div>
     </div>
@@ -383,11 +379,8 @@ app.addEventListener('submit', async (e) => {
 
   try {
     if (action === 'request-otp') {
-      await api.requestOtp(data.email);
-      setState({ view: 'otp', pendingEmail: data.email, error: '' });
-    } else if (action === 'verify-otp') {
-      await api.verifyOtp(S.pendingEmail, data.token);
-      // onAuthStateChange déclenchera afterLogin()
+      await api.requestLoginLink(data.email);
+      setState({ view: 'check-email', pendingEmail: data.email, error: '' });
     } else if (action === 'set-profile-name') {
       const profile = await api.ensureProfile(S.session.user, data.name);
       S.profile = profile;
@@ -424,6 +417,8 @@ app.addEventListener('click', async (e) => {
       setState({ view: 'login', session: null, profile: null });
     } else if (action === 'back-to-login') {
       setState({ view: 'login', error: '' });
+    } else if (action === 'request-login-link-again') {
+      await api.requestLoginLink(S.pendingEmail);
     } else if (action === 'copy-link') {
       await navigator.clipboard.writeText(location.href);
       setState({ error: '' });
