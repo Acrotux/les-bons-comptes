@@ -56,7 +56,8 @@ async function boot() {
     S.session = session;
     await afterLogin();
   } else {
-    setState({ view: 'auth' });
+    const authMode = location.hash === '#inscription' ? 'signup' : 'login';
+    setState({ view: 'auth', authMode });
   }
   window.addEventListener('hashchange', routeFromHash);
 }
@@ -860,7 +861,7 @@ app.addEventListener('click', async (e) => {
       const category = app.querySelector('#new-friend-category')?.value.trim();
       const email = btn.dataset.email;
       await api.inviteFriendByEmail(email, category);
-      const appUrl = window.location.origin + import.meta.env.BASE_URL;
+      const appUrl = window.location.origin + import.meta.env.BASE_URL + '#inscription';
       const subject = encodeURIComponent('Invitation à rejoindre Les Bons Comptes');
       const body = encodeURIComponent(
         `Salut !\n\n${S.profile.display_name} t'invite à rejoindre "Les Bons Comptes" pour gérer vos dépenses partagées.\n\nCrée ton compte ici : ${appUrl}\n\nUtilise bien cette adresse email (${email}) à l'inscription pour être automatiquement ajouté à sa liste d'amis.`
@@ -939,9 +940,17 @@ app.addEventListener('input', (e) => {
   }, 300);
 });
 
+const ERROR_TRANSLATIONS = {
+  'Invalid login credentials': 'Email ou mot de passe incorrect.',
+  'User already registered': 'Un compte existe déjà avec cet email — connecte-toi plutôt.',
+  'Email not confirmed': "Confirme d'abord ton adresse email (lien reçu à l'inscription).",
+  'Password should be at least 6 characters': 'Le mot de passe doit contenir au moins 6 caractères.',
+};
+
 function friendlyError(err) {
   console.error(err);
-  return err?.message || "Une erreur est survenue.";
+  const msg = err?.message || '';
+  return ERROR_TRANSLATIONS[msg] || msg || 'Une erreur est survenue.';
 }
 
 boot();
