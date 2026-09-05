@@ -16,7 +16,8 @@ const S = {
   error: '',
   profileNotice: '',
   lists: [],
-  homeCategory: '',
+  homeTab: 'apercu',
+  overview: { totalToReimburse: 0, totalReimbursed: 0, debtorsCount: 0 },
   list: null,
   members: [],
   memberProfiles: {}, // profile_id -> { display_name, avatar_url }
@@ -91,7 +92,32 @@ async function loadFriends() {
 async function loadHome() {
   if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
   const lists = await api.fetchMyLists();
-  setState({ view: 'home', lists, list: null });
+  const overview = await computeOverview(lists);
+  setState({ view: 'home', lists, list: null, overview });
+}
+
+async function computeOverview(lists) {
+  let totalToReimburse = 0;
+  let totalReimbursed = 0;
+  let debtorsCount = 0;
+
+  await Promise.all(lists.map(async (list) => {
+    const [members, expenses, settlements] = await Promise.all([
+      api.getMembers(list.id),
+      api.getExpenses(list.id),
+      api.getSettlements(list.id),
+    ]);
+    const { balances } = computeBalances(members, expenses, settlements);
+    for (const id of Object.keys(balances)) {
+      if (balances[id] > 0) totalToReimburse += balances[id];
+      if (balances[id] < 0) debtorsCount += 1;
+    }
+    for (const s of settlements) {
+      if (s.confirmed_at) totalReimbursed += s.amount_cents;
+    }
+  }));
+
+  return { totalToReimburse, totalReimbursed, debtorsCount };
 }
 
 async function openList(listId) {
@@ -360,10 +386,16 @@ function renderFriendsPage() {
 }
 
 function renderHome() {
-  const filtered = S.homeCategory ? S.lists.filter((l) => l.category === S.homeCategory) : S.lists;
-  const open = filtered.filter((l) => l.status === 'open');
-  const closed = filtered.filter((l) => l.status === 'closed');
   const usedCategories = [...new Set(S.lists.map((l) => l.category).filter(Boolean))].sort();
+  const hasUncategorized = S.lists.some((l) => !l.category);
+  const tabs = [
+    { key: 'apercu', label: '📊 Aperçu' },
+    { key: 'toutes', label: 'Toutes' },
+    ...usedCategories.map((c) => ({ key: c, label: c })),
+    ...(hasUncategorized ? [{ key: '__none__', label: 'Sans catégorie' }] : []),
+  ];
+  const activeTab = tabs.some((t) => t.key === S.homeTab) ? S.homeTab : 'apercu';
+
   const listCard = (l) => `
     <a class="card list-card" href="#/list/${l.id}">
       <div class="list-card-title">${escapeHtml(l.name)}</div>
@@ -374,6 +406,40 @@ function renderHome() {
       </div>
     </a>
   `;
+
+  let tabContent;
+  if (activeTab === 'apercu') {
+    tabContent = `
+      <div class="stat-grid">
+        <div class="card stat-tile">
+          <div class="stat-value">${formatCents(S.overview.totalToReimburse)}</div>
+          <div class="stat-label">Montant total à rembourser</div>
+        </div>
+        <div class="card stat-tile">
+          <div class="stat-value">${formatCents(S.overview.totalReimbursed)}</div>
+          <div class="stat-label">Montant déjà remboursé</div>
+        </div>
+        <div class="card stat-tile">
+          <div class="stat-value">${S.overview.debtorsCount}</div>
+          <div class="stat-label">Participant(s) n'ayant pas encore remboursé leurs dettes</div>
+        </div>
+      </div>
+    `;
+  } else {
+    const filtered = activeTab === 'toutes'
+      ? S.lists
+      : activeTab === '__none__'
+        ? S.lists.filter((l) => !l.category)
+        : S.lists.filter((l) => l.category === activeTab);
+    const open = filtered.filter((l) => l.status === 'open');
+    const closed = filtered.filter((l) => l.status === 'closed');
+    tabContent = `
+      <h2>Listes en cours</h2>
+      <div class="list-grid">${open.length ? open.map(listCard).join('') : '<p class="muted">Aucune liste en cours.</p>'}</div>
+      ${closed.length ? `<h2>Historique</h2><div class="list-grid">${closed.map(listCard).join('')}</div>` : ''}
+    `;
+  }
+
   return `
     <div class="page">
       <div class="card">
@@ -389,20 +455,11 @@ function renderHome() {
         </form>
       </div>
 
-      ${usedCategories.length ? `
-        <div class="category-filter">
-          <label>Filtrer par catégorie :</label>
-          <select data-action="filter-category">
-            <option value="">Toutes</option>
-            ${usedCategories.map((c) => `<option value="${c}" ${c === S.homeCategory ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
-          </select>
-        </div>
-      ` : ''}
+      <div class="tabs">
+        ${tabs.map((t) => `<button class="tab ${t.key === activeTab ? 'active' : ''}" data-action="switch-home-tab" data-tab="${t.key}">${escapeHtml(t.label)}</button>`).join('')}
+      </div>
 
-      <h2>Mes listes en cours</h2>
-      <div class="list-grid">${open.length ? open.map(listCard).join('') : '<p class="muted">Aucune liste en cours.</p>'}</div>
-
-      ${closed.length ? `<h2>Historique</h2><div class="list-grid">${closed.map(listCard).join('')}</div>` : ''}
+      ${tabContent}
     </div>
   `;
 }
@@ -755,6 +812,8 @@ app.addEventListener('click', async (e) => {
     } else if (action === 'add-member-from-search') {
       await api.addMemberByProfile(S.list.id, btn.dataset.id, btn.dataset.name);
       setState({ memberSearchResults: [] });
+    } else if (action === 'switch-home-tab') {
+      setState({ homeTab: btn.dataset.tab });
     }
   } catch (err) {
     setState({ error: friendlyError(err) });
@@ -773,8 +832,6 @@ app.addEventListener('change', async (e) => {
       await loadFriends();
     } else if (action === 'update-list-category') {
       await api.updateListCategory(S.list.id, el.value);
-    } else if (action === 'filter-category') {
-      setState({ homeCategory: el.value });
     }
   } catch (err) {
     setState({ error: friendlyError(err) });
