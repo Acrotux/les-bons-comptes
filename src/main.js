@@ -55,7 +55,14 @@ function renderAvatar(url, name, size) {
 
 // ---------------- Boot ----------------
 
+const LEGAL_VIEWS = { '#/mentions-legales': 'legal-mentions', '#/confidentialite': 'legal-privacy' };
+
 async function boot() {
+  window.addEventListener('hashchange', routeFromHash);
+  if (LEGAL_VIEWS[location.hash]) {
+    setState({ view: LEGAL_VIEWS[location.hash] });
+    return;
+  }
   const session = await api.getSession();
   api.onAuthStateChange((session) => {
     S.session = session;
@@ -69,7 +76,6 @@ async function boot() {
     const authMode = location.hash === '#inscription' ? 'signup' : 'login';
     setState({ view: 'auth', authMode });
   }
-  window.addEventListener('hashchange', routeFromHash);
 }
 
 async function afterLogin() {
@@ -84,6 +90,10 @@ async function afterLogin() {
 }
 
 async function routeFromHash() {
+  if (LEGAL_VIEWS[location.hash]) {
+    setState({ view: LEGAL_VIEWS[location.hash] });
+    return;
+  }
   const m = location.hash.match(/^#\/list\/([a-f0-9-]+)/i);
   if (location.hash === '#/profil') {
     if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
@@ -156,6 +166,8 @@ function render() {
   else if (S.view === 'confirm-email') app.innerHTML = renderConfirmEmail();
   else if (S.view === 'reset-sent') app.innerHTML = renderResetSent();
   else if (S.view === 'account-deleted') app.innerHTML = renderAccountDeleted();
+  else if (S.view === 'legal-mentions') app.innerHTML = renderLegalMentions();
+  else if (S.view === 'legal-privacy') app.innerHTML = renderLegalPrivacy();
   else if (S.view === 'onboarding-name') app.innerHTML = renderOnboarding();
   else if (S.view === 'profile') app.innerHTML = renderTopbar() + renderProfilePage();
   else if (S.view === 'friends') app.innerHTML = renderTopbar() + renderFriendsPage();
@@ -184,6 +196,12 @@ function renderAuth() {
   return renderLogin();
 }
 
+const AUTH_LEGAL_FOOTER = `
+  <p class="legal-footer muted">
+    <a href="#/mentions-legales">Mentions légales</a> · <a href="#/confidentialite">Confidentialité</a>
+  </p>
+`;
+
 function renderLogin() {
   return `
     <div class="center-screen">
@@ -200,6 +218,7 @@ function renderLogin() {
         </form>
         <button class="link-btn" data-action="show-signup">Créer un compte</button>
         <button class="link-btn" data-action="show-forgot">Mot de passe oublié ?</button>
+        ${AUTH_LEGAL_FOOTER}
       </div>
     </div>
   `;
@@ -221,6 +240,7 @@ function renderSignup() {
           <button type="submit">Créer mon compte</button>
         </form>
         <button class="link-btn" data-action="show-login">J'ai déjà un compte</button>
+        ${AUTH_LEGAL_FOOTER}
       </div>
     </div>
   `;
@@ -239,6 +259,7 @@ function renderForgot() {
           <button type="submit">Envoyer le lien</button>
         </form>
         <button class="link-btn" data-action="show-login">Retour à la connexion</button>
+        ${AUTH_LEGAL_FOOTER}
       </div>
     </div>
   `;
@@ -276,6 +297,51 @@ function renderAccountDeleted() {
         <p class="muted">Ton compte a été anonymisé et la connexion définitivement bloquée. Merci d'avoir utilisé Les Bons Comptes.</p>
         <button class="link-btn" data-action="show-login">Retour à l'accueil</button>
       </div>
+    </div>
+  `;
+}
+
+function renderLegalMentions() {
+  return `
+    <div class="page legal-page">
+      <h1>Mentions légales</h1>
+      <p><strong>Éditeur du site</strong><br />Acrotux, à titre personnel et non commercial.<br />Contact : <a href="mailto:cartoux.j@gmail.com">cartoux.j@gmail.com</a></p>
+      <p><strong>Hébergement des fichiers du site</strong><br />GitHub Pages (GitHub, Inc., 88 Colin P Kelly Jr St, San Francisco, CA 94107, États-Unis).</p>
+      <p><strong>Hébergement des données</strong><br />Supabase (base de données et fichiers), région Union Européenne (Irlande).</p>
+      <p><strong>Directeur de la publication</strong><br />Acrotux.</p>
+      <p>Voir aussi la <a href="#/confidentialite">politique de confidentialité</a>.</p>
+      <button class="link-btn" data-action="legal-back">&larr; Retour</button>
+    </div>
+  `;
+}
+
+function renderLegalPrivacy() {
+  return `
+    <div class="page legal-page">
+      <h1>Politique de confidentialité</h1>
+
+      <h2>Données collectées</h2>
+      <p>Pseudo, adresse email, mot de passe (stocké de façon chiffrée, jamais en clair), photo de profil optionnelle, ainsi que les données que tu saisis dans l'application : listes de dépenses, montants, participants, remboursements. Les participants sans compte que tu ajoutes à une liste peuvent avoir un nom et une adresse email associés.</p>
+
+      <h2>Finalités</h2>
+      <p>Ces données servent uniquement à faire fonctionner l'application : authentification, gestion des listes de dépenses partagées, calcul des soldes et des remboursements.</p>
+
+      <h2>Qui voit quoi</h2>
+      <p>Ton pseudo et ta photo de profil sont visibles par les autres participants des listes auxquelles tu appartiens. Les dépenses et remboursements d'une liste sont visibles par tous ses participants. Ton adresse email n'est jamais affichée publiquement ni partagée avec les autres utilisateurs, sauf si tu choisis toi-même de la renseigner comme contact d'un participant.</p>
+
+      <h2>Sous-traitants</h2>
+      <p><strong>Supabase</strong> (base de données, authentification, stockage des photos) — hébergé dans l'Union Européenne.<br /><strong>GitHub Pages</strong> (hébergement des fichiers statiques du site, aucune donnée personnelle n'y est stockée).</p>
+
+      <h2>Conservation</h2>
+      <p>Tes données sont conservées tant que ton compte existe. Les dépenses/remboursements déjà enregistrés dans une liste partagée peuvent rester visibles aux autres participants après la suppression de ton compte, mais sans ton nom ni ta photo (anonymisés).</p>
+
+      <h2>Stockage local du navigateur</h2>
+      <p>L'application utilise le stockage local de ton navigateur (localStorage) pour maintenir ta connexion. Aucun cookie publicitaire ou traceur tiers n'est utilisé.</p>
+
+      <h2>Tes droits</h2>
+      <p>Tu peux à tout moment accéder à tes données, les corriger, ou supprimer ton compte directement depuis la page « Mon profil » (section « Zone dangereuse »). Pour toute autre demande (portabilité, opposition, question), contacte <a href="mailto:cartoux.j@gmail.com">cartoux.j@gmail.com</a>.</p>
+
+      <button class="link-btn" data-action="legal-back">&larr; Retour</button>
     </div>
   `;
 }
@@ -951,6 +1017,9 @@ app.addEventListener('click', async (e) => {
       setState({ confirmDeleteAccount: true });
     } else if (action === 'cancel-delete-account') {
       setState({ confirmDeleteAccount: false, error: '' });
+    } else if (action === 'legal-back') {
+      if (S.session) location.hash = '#/';
+      else setState({ view: 'auth', authMode: 'login', error: '' });
     }
   } catch (err) {
     setState({ error: friendlyError(err) });

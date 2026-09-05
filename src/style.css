@@ -240,6 +240,11 @@ button:hover { opacity: 0.9; }
 .danger-zone { border-color: var(--danger); }
 .danger-btn { background: var(--danger); }
 
+.legal-footer { text-align: center; font-size: 0.8rem; margin-top: 1.5rem; }
+.legal-footer a { color: var(--text-muted); }
+.legal-page { line-height: 1.6; }
+.legal-page h2 { margin-top: 1.5rem; font-size: 1.1rem; }
+
 .banner.notice {
   background: color-mix(in srgb, var(--credit) 15%, transparent);
   border: 1px solid var(--credit);
