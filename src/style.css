@@ -186,4 +186,30 @@ button:hover { opacity: 0.9; }
 
 .mail-link { color: var(--text-muted); text-decoration: none; }
 
+.profile-link { display: flex; align-items: center; gap: 0.5rem; text-decoration: none; color: var(--text); }
+.avatar-mini, .avatar-large {
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 700;
+}
+.avatar-mini { width: 1.75rem; height: 1.75rem; font-size: 0.9rem; }
+.avatar-large { width: 5rem; height: 5rem; font-size: 2rem; }
+.avatar-row { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
+.avatar-form { flex-direction: row; flex-wrap: wrap; gap: 0.5rem; }
+
+.banner.notice {
+  background: color-mix(in srgb, var(--credit) 15%, transparent);
+  border: 1px solid var(--credit);
+  color: var(--text);
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  max-width: 640px;
+  margin: 0.5rem auto;
+}
+
 h1, h2, h3 { font-family: var(--font-sans); }

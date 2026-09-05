@@ -12,6 +12,7 @@ const S = {
   authMode: 'login', // login | signup | forgot
   pendingEmail: '',
   error: '',
+  profileNotice: '',
   lists: [],
   list: null,
   members: [],
@@ -19,7 +20,6 @@ const S = {
   settlements: [],
   unsubscribe: null,
   inlineEdit: null, // { type: 'member', id } | { type: 'confirm-remove-member', id }
-  editingProfile: false,
 };
 
 function setState(patch) {
@@ -63,7 +63,10 @@ async function afterLogin() {
 
 async function routeFromHash() {
   const m = location.hash.match(/^#\/list\/([a-f0-9-]+)/i);
-  if (m) {
+  if (location.hash === '#/profil') {
+    if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
+    setState({ view: 'profile', error: '', profileNotice: '' });
+  } else if (m) {
     await openList(m[1]);
   } else {
     await loadHome();
@@ -111,26 +114,20 @@ function render() {
   else if (S.view === 'confirm-email') app.innerHTML = renderConfirmEmail();
   else if (S.view === 'reset-sent') app.innerHTML = renderResetSent();
   else if (S.view === 'onboarding-name') app.innerHTML = renderOnboarding();
+  else if (S.view === 'profile') app.innerHTML = renderTopbar() + renderProfilePage();
   else if (S.view === 'home') app.innerHTML = renderTopbar() + renderHome();
   else if (S.view === 'list') app.innerHTML = renderTopbar() + renderList();
 }
 
 function renderTopbar() {
-  const profileArea = S.editingProfile ? `
-    <form data-action="update-profile-name" class="inline-edit-form">
-      <input type="text" name="name" value="${escapeHtml(S.profile?.display_name || '')}" required class="inline-edit-input" />
-      <button type="submit">OK</button>
-      <button type="button" data-action="cancel-edit-profile">Annuler</button>
-    </form>
-  ` : `
-    <span>${escapeHtml(S.profile?.display_name || '')}</span>
-    <button class="icon-btn" data-action="toggle-edit-profile">✎</button>
-  `;
+  const avatar = S.profile?.avatar_url
+    ? `<img class="avatar-mini" src="${escapeHtml(S.profile.avatar_url)}" alt="" />`
+    : `<span class="avatar-mini avatar-placeholder">${escapeHtml((S.profile?.display_name || '?')[0].toUpperCase())}</span>`;
   return `
     <div class="topbar">
       <a href="#/" class="brand">🧾 Les Bons Comptes</a>
       <div class="profile-chip">
-        ${profileArea}
+        <a class="profile-link" href="#/profil">${avatar}<span>${escapeHtml(S.profile?.display_name || '')}</span></a>
         <button data-action="logout">Se déconnecter</button>
       </div>
     </div>
@@ -240,6 +237,57 @@ function renderOnboarding() {
           <button type="submit">Continuer</button>
         </form>
       </div>
+    </div>
+  `;
+}
+
+function renderProfilePage() {
+  const p = S.profile;
+  const avatar = p?.avatar_url
+    ? `<img class="avatar-large" src="${escapeHtml(p.avatar_url)}" alt="" />`
+    : `<span class="avatar-large avatar-placeholder">${escapeHtml((p?.display_name || '?')[0].toUpperCase())}</span>`;
+  return `
+    <div class="page">
+      <h1>Mon profil</h1>
+      ${S.profileNotice ? `<div class="banner notice">${escapeHtml(S.profileNotice)}</div>` : ''}
+
+      <div class="card">
+        <h2>Photo de profil</h2>
+        <div class="avatar-row">
+          ${avatar}
+          <form data-action="upload-avatar" class="avatar-form">
+            <input type="file" name="avatar" accept="image/*" required />
+            <button type="submit">Changer la photo</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Pseudo</h2>
+        <form data-action="update-profile-name">
+          <input type="text" name="name" value="${escapeHtml(p?.display_name || '')}" required />
+          <button type="submit">Enregistrer</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Adresse email</h2>
+        <p class="muted">Actuelle : ${escapeHtml(S.session.user.email)}</p>
+        <form data-action="update-email">
+          <input type="email" name="email" required placeholder="nouvelle-adresse@exemple.com" />
+          <button type="submit">Changer l'email</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Mot de passe</h2>
+        <form data-action="update-password">
+          <input type="password" name="password" required minlength="6" placeholder="Nouveau mot de passe (6 caractères min.)" />
+          <button type="submit">Changer le mot de passe</button>
+        </form>
+      </div>
+
+      <a class="link-btn" href="#/">&larr; Retour</a>
     </div>
   `;
 }
@@ -454,7 +502,7 @@ app.addEventListener('submit', async (e) => {
       await api.signInWithPassword(data.email, data.password);
       // onAuthStateChange déclenchera afterLogin()
     } else if (action === 'signup') {
-      const { user, session } = await api.signUp(data.email, data.password);
+      const { session } = await api.signUp(data.email, data.password);
       if (session) {
         S.session = session;
         const profile = await api.ensureProfile(session.user, data.name);
@@ -489,7 +537,21 @@ app.addEventListener('submit', async (e) => {
     } else if (action === 'update-profile-name') {
       await api.updateProfileName(S.session.user.id, data.name);
       S.profile = { ...S.profile, display_name: data.name };
-      setState({ editingProfile: false });
+      setState({ profileNotice: 'Pseudo mis à jour.' });
+    } else if (action === 'upload-avatar') {
+      const file = form.avatar.files[0];
+      const avatarUrl = await api.uploadAvatar(S.session.user.id, file);
+      S.profile = { ...S.profile, avatar_url: avatarUrl };
+      form.reset();
+      setState({ profileNotice: 'Photo de profil mise à jour.' });
+    } else if (action === 'update-email') {
+      await api.updateEmail(data.email);
+      form.reset();
+      setState({ profileNotice: `Un email de confirmation a été envoyé à ${data.email} et à ton adresse actuelle. Le changement prendra effet une fois confirmé.` });
+    } else if (action === 'update-password') {
+      await api.updatePassword(data.password);
+      form.reset();
+      setState({ profileNotice: 'Mot de passe mis à jour.' });
     }
   } catch (err) {
     setState({ error: friendlyError(err) });
@@ -511,10 +573,6 @@ app.addEventListener('click', async (e) => {
       setState({ view: 'auth', authMode: 'signup', error: '' });
     } else if (action === 'show-forgot') {
       setState({ view: 'auth', authMode: 'forgot', error: '' });
-    } else if (action === 'toggle-edit-profile') {
-      setState({ editingProfile: true });
-    } else if (action === 'cancel-edit-profile') {
-      setState({ editingProfile: false });
     } else if (action === 'copy-link') {
       await navigator.clipboard.writeText(location.href);
       setState({ error: '' });

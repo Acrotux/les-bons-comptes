@@ -54,6 +54,31 @@ export async function updateProfileName(userId, displayName) {
   if (error) throw error;
 }
 
+export async function uploadAvatar(userId, file) {
+  const ext = file.name.split('.').pop();
+  const path = `${userId}/avatar.${ext}`;
+  const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, {
+    upsert: true,
+    contentType: file.type,
+  });
+  if (uploadError) throw uploadError;
+  const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+  const avatarUrl = `${data.publicUrl}?t=${Date.now()}`;
+  const { error: updateError } = await supabase.from('profiles').update({ avatar_url: avatarUrl }).eq('id', userId);
+  if (updateError) throw updateError;
+  return avatarUrl;
+}
+
+export async function updateEmail(newEmail) {
+  const { error } = await supabase.auth.updateUser({ email: newEmail });
+  if (error) throw error;
+}
+
+export async function updatePassword(newPassword) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+}
+
 // Rattache automatiquement les invitations (participants placeholder) faites à mon email.
 export async function claimInvites(email) {
   const { data: { user } } = await supabase.auth.getUser();
