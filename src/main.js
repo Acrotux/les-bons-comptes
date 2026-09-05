@@ -43,6 +43,14 @@ function nameOf(id) {
   return m ? m.display_name : '?';
 }
 
+function renderAvatar(url, name, size) {
+  const cls = size === 'large' ? 'avatar-large' : 'avatar-mini';
+  const initial = (name || '?').trim().charAt(0).toUpperCase() || '?';
+  return url
+    ? `<img class="${cls}" src="${escapeHtml(url)}" alt="" />`
+    : `<span class="${cls} avatar-placeholder">${escapeHtml(initial)}</span>`;
+}
+
 // ---------------- Boot ----------------
 
 async function boot() {
@@ -153,9 +161,7 @@ function render() {
 }
 
 function renderTopbar() {
-  const avatar = S.profile?.avatar_url
-    ? `<img class="avatar-mini" src="${escapeHtml(S.profile.avatar_url)}" alt="" />`
-    : `<span class="avatar-mini avatar-placeholder">${escapeHtml((S.profile?.display_name || '?')[0].toUpperCase())}</span>`;
+  const avatar = renderAvatar(S.profile?.avatar_url, S.profile?.display_name, 'mini');
   return `
     <div class="topbar">
       <a href="#/" class="brand">🧾 Les Bons Comptes</a>
@@ -208,7 +214,7 @@ function renderSignup() {
           <label>Adresse email</label>
           <input type="email" name="email" required placeholder="toi@exemple.com" />
           <label>Mot de passe</label>
-          <input type="password" name="password" required minlength="6" placeholder="6 caractères minimum" />
+          <input type="password" name="password" required minlength="8" placeholder="8 caractères minimum" />
           <button type="submit">Créer mon compte</button>
         </form>
         <button class="link-btn" data-action="show-login">J'ai déjà un compte</button>
@@ -277,9 +283,7 @@ function renderOnboarding() {
 
 function renderProfilePage() {
   const p = S.profile;
-  const avatar = p?.avatar_url
-    ? `<img class="avatar-large" src="${escapeHtml(p.avatar_url)}" alt="" />`
-    : `<span class="avatar-large avatar-placeholder">${escapeHtml((p?.display_name || '?')[0].toUpperCase())}</span>`;
+  const avatar = renderAvatar(p?.avatar_url, p?.display_name, 'large');
   return `
     <div class="page">
       <h1>Mon profil</h1>
@@ -290,7 +294,7 @@ function renderProfilePage() {
         <div class="avatar-row">
           ${avatar}
           <form data-action="upload-avatar" class="avatar-form">
-            <input type="file" name="avatar" accept="image/*" required />
+            <input type="file" name="avatar" accept="image/png,image/jpeg,image/webp,image/gif" required />
             <button type="submit">Changer la photo</button>
           </form>
         </div>
@@ -316,7 +320,7 @@ function renderProfilePage() {
       <div class="card">
         <h2>Mot de passe</h2>
         <form data-action="update-password">
-          <input type="password" name="password" required minlength="6" placeholder="Nouveau mot de passe (6 caractères min.)" />
+          <input type="password" name="password" required minlength="8" placeholder="Nouveau mot de passe (8 caractères min.)" />
           <button type="submit">Changer le mot de passe</button>
         </form>
       </div>
@@ -351,7 +355,7 @@ function renderFriendsPage() {
           <ul class="search-results">
             ${S.friendSearchResults.map((p) => `
               <li>
-                ${p.avatar_url ? `<img class="avatar-mini" src="${escapeHtml(p.avatar_url)}" alt="" />` : `<span class="avatar-mini avatar-placeholder">${escapeHtml(p.display_name[0].toUpperCase())}</span>`}
+                ${renderAvatar(p.avatar_url, p.display_name, 'mini')}
                 <span>${escapeHtml(p.display_name)}</span>
                 <button data-action="add-friend" data-id="${p.id}">Ajouter</button>
               </li>
@@ -382,7 +386,7 @@ function renderFriendsPage() {
         <ul class="member-list">
           ${grouped[cat].map((f) => `
             <li>
-              ${f.avatar_url ? `<img class="avatar-mini" src="${escapeHtml(f.avatar_url)}" alt="" />` : `<span class="avatar-mini avatar-placeholder">${escapeHtml(f.display_name[0].toUpperCase())}</span>`}
+              ${renderAvatar(f.avatar_url, f.display_name, 'mini')}
               <span>${escapeHtml(f.display_name)}</span>
               <input type="text" list="friend-category-options" data-action="update-friend-category" data-id="${f.id}" value="${escapeHtml(f.category)}" />
               <button class="icon-btn" data-action="remove-friend" data-id="${f.id}">🗑</button>
@@ -492,7 +496,7 @@ function renderList() {
           <ul class="search-results">
             ${S.memberSearchResults.map((p) => `
               <li>
-                ${p.avatar_url ? `<img class="avatar-mini" src="${escapeHtml(p.avatar_url)}" alt="" />` : `<span class="avatar-mini avatar-placeholder">${escapeHtml(p.display_name[0].toUpperCase())}</span>`}
+                ${renderAvatar(p.avatar_url, p.display_name, 'mini')}
                 <span>${escapeHtml(p.display_name)}</span>
                 <button data-action="add-member-from-search" data-id="${p.id}" data-name="${escapeHtml(p.display_name)}">Ajouter</button>
               </li>
@@ -638,9 +642,7 @@ function renderSummaryMailto(list, memberIds, balances) {
 function renderMemberAvatar(m) {
   const profile = m.profile_id ? S.memberProfiles[m.profile_id] : null;
   const isCreator = m.profile_id && m.profile_id === S.list?.created_by;
-  const img = profile?.avatar_url
-    ? `<img class="avatar-mini" src="${escapeHtml(profile.avatar_url)}" alt="" />`
-    : `<span class="avatar-mini avatar-placeholder">${escapeHtml(m.display_name[0].toUpperCase())}</span>`;
+  const img = renderAvatar(profile?.avatar_url, m.display_name, 'mini');
   return `<span class="avatar-wrap">${img}${isCreator ? '<span class="crown" title="Créateur de la liste">👑</span>' : ''}</span>`;
 }
 
@@ -943,7 +945,7 @@ const ERROR_TRANSLATIONS = {
   'Invalid login credentials': 'Email ou mot de passe incorrect.',
   'User already registered': 'Un compte existe déjà avec cet email — connecte-toi plutôt.',
   'Email not confirmed': "Confirme d'abord ton adresse email (lien reçu à l'inscription).",
-  'Password should be at least 6 characters': 'Le mot de passe doit contenir au moins 6 caractères.',
+  'Password should be at least 8 characters': 'Le mot de passe doit contenir au moins 8 caractères.',
 };
 
 function friendlyError(err) {
