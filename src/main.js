@@ -1,0 +1,472 @@
+import './style.css';
+import { supabase } from './supabase.js';
+import * as api from './api.js';
+import { computeBalances, computeTransactions, formatCents } from './balances.js';
+
+const app = document.getElementById('app');
+
+const S = {
+  session: null,
+  profile: null,
+  view: 'loading', // loading | login | otp | onboarding-name | home | list
+  pendingEmail: '',
+  error: '',
+  lists: [],
+  list: null,
+  members: [],
+  expenses: [],
+  settlements: [],
+  unsubscribe: null,
+  inlineEdit: null, // { type: 'member', id } | { type: 'confirm-remove-member', id }
+};
+
+function setState(patch) {
+  Object.assign(S, patch);
+  render();
+}
+
+function nameOf(id) {
+  const m = S.members.find((x) => x.id === id);
+  return m ? m.display_name : '?';
+}
+
+// ---------------- Boot ----------------
+
+async function boot() {
+  const session = await api.getSession();
+  api.onAuthStateChange((session) => {
+    S.session = session;
+    if (session) afterLogin();
+    else setState({ view: 'login', profile: null });
+  });
+  if (session) {
+    S.session = session;
+    await afterLogin();
+  } else {
+    setState({ view: 'login' });
+  }
+  window.addEventListener('hashchange', routeFromHash);
+}
+
+async function afterLogin() {
+  const { data: existing } = await supabase.from('profiles').select('*').eq('id', S.session.user.id).maybeSingle();
+  if (!existing) {
+    setState({ view: 'onboarding-name' });
+    return;
+  }
+  S.profile = existing;
+  await api.claimInvites(S.session.user.email);
+  routeFromHash();
+}
+
+async function routeFromHash() {
+  const m = location.hash.match(/^#\/list\/([a-f0-9-]+)/i);
+  if (m) {
+    await openList(m[1]);
+  } else {
+    await loadHome();
+  }
+}
+
+async function loadHome() {
+  if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
+  const lists = await api.fetchMyLists();
+  setState({ view: 'home', lists, list: null });
+}
+
+async function openList(listId) {
+  if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
+  try {
+    const list = await api.getList(listId);
+    const [members, expenses, settlements] = await Promise.all([
+      api.getMembers(listId),
+      api.getExpenses(listId),
+      api.getSettlements(listId),
+    ]);
+    S.unsubscribe = api.subscribeToList(listId, () => refreshList(listId));
+    setState({ view: 'list', list, members, expenses, settlements });
+    location.hash = `#/list/${listId}`;
+  } catch (e) {
+    setState({ view: 'home', error: "Liste introuvable ou accès non autorisé." });
+  }
+}
+
+async function refreshList(listId) {
+  const [list, members, expenses, settlements] = await Promise.all([
+    api.getList(listId),
+    api.getMembers(listId),
+    api.getExpenses(listId),
+    api.getSettlements(listId),
+  ]);
+  setState({ list, members, expenses, settlements });
+}
+
+// ---------------- Render ----------------
+
+function render() {
+  if (S.view === 'loading') app.innerHTML = `<div class="center-screen">Chargement…</div>`;
+  else if (S.view === 'login') app.innerHTML = renderLogin();
+  else if (S.view === 'otp') app.innerHTML = renderOtp();
+  else if (S.view === 'onboarding-name') app.innerHTML = renderOnboarding();
+  else if (S.view === 'home') app.innerHTML = renderTopbar() + renderHome();
+  else if (S.view === 'list') app.innerHTML = renderTopbar() + renderList();
+}
+
+function renderTopbar() {
+  return `
+    <div class="topbar">
+      <a href="#/" class="brand">🧾 Les Bons Comptes</a>
+      <div class="profile-chip">
+        <span>${escapeHtml(S.profile?.display_name || '')}</span>
+        <button data-action="logout">Se déconnecter</button>
+      </div>
+    </div>
+    ${S.error ? `<div class="banner error">${escapeHtml(S.error)}</div>` : ''}
+  `;
+}
+
+function renderLogin() {
+  return `
+    <div class="center-screen">
+      <div class="card auth-card">
+        <h1>🧾 Les Bons Comptes</h1>
+        <p class="muted">Connecte-toi avec ton email pour retrouver tes listes.</p>
+        ${S.error ? `<div class="banner error">${escapeHtml(S.error)}</div>` : ''}
+        <form data-action="request-otp">
+          <label>Adresse email</label>
+          <input type="email" name="email" required placeholder="toi@exemple.com" />
+          <button type="submit">Recevoir un code</button>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderOtp() {
+  return `
+    <div class="center-screen">
+      <div class="card auth-card">
+        <h1>Vérifie ton email</h1>
+        <p class="muted">Un code à usage unique a été envoyé à <strong>${escapeHtml(S.pendingEmail)}</strong>.</p>
+        ${S.error ? `<div class="banner error">${escapeHtml(S.error)}</div>` : ''}
+        <form data-action="verify-otp">
+          <label>Code reçu par email</label>
+          <input type="text" name="token" inputmode="numeric" required placeholder="123456" />
+          <button type="submit">Valider</button>
+        </form>
+        <button class="link-btn" data-action="back-to-login">Changer d'adresse email</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderOnboarding() {
+  return `
+    <div class="center-screen">
+      <div class="card auth-card">
+        <h1>Bienvenue 👋</h1>
+        <p class="muted">Comment veux-tu que les autres te voient ?</p>
+        <form data-action="set-profile-name">
+          <label>Ton nom ou pseudo</label>
+          <input type="text" name="name" required placeholder="Ex : Marie" />
+          <button type="submit">Continuer</button>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderHome() {
+  const open = S.lists.filter((l) => l.status === 'open');
+  const closed = S.lists.filter((l) => l.status === 'closed');
+  const listCard = (l) => `
+    <a class="card list-card" href="#/list/${l.id}">
+      <div class="list-card-title">${escapeHtml(l.name)}</div>
+      <div class="list-card-meta">
+        <span class="badge ${l.status}">${l.status === 'open' ? 'ouverte' : 'clôturée'}</span>
+        <span class="badge muted">${l.is_private ? 'privée' : 'publique'}</span>
+      </div>
+    </a>
+  `;
+  return `
+    <div class="page">
+      <div class="card">
+        <h2>Nouvelle liste</h2>
+        <form data-action="create-list" class="create-list-form">
+          <input type="text" name="name" required placeholder="Ex : Week-end à Lyon" />
+          <label class="checkbox"><input type="checkbox" name="isPrivate" /> Privée (accessible seulement par lien/invitation)</label>
+          <button type="submit">Créer</button>
+        </form>
+      </div>
+
+      <h2>Mes listes en cours</h2>
+      <div class="list-grid">${open.length ? open.map(listCard).join('') : '<p class="muted">Aucune liste en cours.</p>'}</div>
+
+      ${closed.length ? `<h2>Historique</h2><div class="list-grid">${closed.map(listCard).join('')}</div>` : ''}
+    </div>
+  `;
+}
+
+function renderList() {
+  const list = S.list;
+  const uid = S.session.user.id;
+  const isCreator = list.created_by === uid;
+  const myMember = S.members.find((m) => m.profile_id === uid);
+  const isMember = !!myMember;
+
+  const { total, shares, paid, balances, memberIds } = computeBalances(S.members, S.expenses, S.settlements);
+  const transactions = computeTransactions(balances, memberIds);
+
+  return `
+    <div class="page">
+      <div class="list-header">
+        <h1>${escapeHtml(list.name)}</h1>
+        <div class="list-header-actions">
+          <span class="badge ${list.status}">${list.status === 'open' ? 'ouverte' : 'clôturée'}</span>
+          <span class="badge muted">${list.is_private ? 'privée' : 'publique'}</span>
+          <button data-action="copy-link">Copier le lien</button>
+          ${isCreator ? `<button data-action="toggle-privacy" data-private="${list.is_private}">${list.is_private ? 'Rendre publique' : 'Rendre privée'}</button>` : ''}
+          ${isCreator ? `<button data-action="toggle-status" data-status="${list.status}">${list.status === 'open' ? 'Clôturer' : 'Rouvrir'}</button>` : ''}
+        </div>
+      </div>
+
+      ${!isMember && !list.is_private ? `
+        <div class="card">
+          <p>Tu n'es pas encore participant de cette liste.</p>
+          <button data-action="join-list">Rejoindre la liste</button>
+        </div>
+      ` : ''}
+
+      <div class="card">
+        <h2>Participants</h2>
+        <ul class="member-list">
+          ${S.members.map((m) => renderMember(m, isCreator)).join('')}
+        </ul>
+        <form data-action="add-member" class="add-member-form">
+          <input type="text" name="name" required placeholder="Nom du participant" />
+          <input type="email" name="email" placeholder="Email (optionnel)" />
+          <button type="submit">Ajouter</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Dépenses <span class="muted">(total ${formatCents(total)})</span></h2>
+        <ul class="expense-list">
+          ${S.expenses.map((e) => renderExpense(e, uid, isCreator)).join('') || '<p class="muted">Aucune dépense pour l\'instant.</p>'}
+        </ul>
+        ${isMember ? `
+          <form data-action="add-expense" class="expense-form">
+            <select name="memberId" class="payer-select">
+              ${S.members.map((m) => `<option value="${m.id}">${escapeHtml(m.display_name)}</option>`).join('')}
+            </select>
+            <input type="text" name="label" required placeholder="Libellé (ex : Courses)" />
+            <input type="number" name="amount" required min="0.01" step="0.01" placeholder="Montant €" />
+            <button type="submit">Ajouter</button>
+          </form>
+        ` : ''}
+      </div>
+
+      <div class="card">
+        <h2>Soldes</h2>
+        <ul class="balance-list">
+          ${memberIds.map((id) => renderBalance(id, balances[id])).join('')}
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>Remboursements suggérés</h2>
+        ${transactions.length ? `<ul class="tx-list">${transactions.map((t) => renderTransaction(t, myMember)).join('')}</ul>` : '<p class="muted">Tout le monde est à jour 🎉</p>'}
+        ${renderPendingSettlements(myMember)}
+      </div>
+    </div>
+  `;
+}
+
+function renderMember(m, isCreator) {
+  if (S.inlineEdit && S.inlineEdit.type === 'member' && S.inlineEdit.id === m.id) {
+    return `
+      <li>
+        <form data-action="edit-member-inline" data-id="${m.id}" class="inline-edit-form">
+          <input type="text" name="name" value="${escapeHtml(m.display_name)}" required class="inline-edit-input" />
+          <input type="email" name="email" value="${escapeHtml(m.email || '')}" placeholder="Email" class="inline-edit-input" />
+          <button type="submit">OK</button>
+          <button type="button" data-action="cancel-inline">Annuler</button>
+        </form>
+      </li>
+    `;
+  }
+  if (S.inlineEdit && S.inlineEdit.type === 'confirm-remove-member' && S.inlineEdit.id === m.id) {
+    return `
+      <li>
+        <span>Supprimer ${escapeHtml(m.display_name)} ?</span>
+        <button data-action="confirm-remove-member" data-id="${m.id}">Confirmer</button>
+        <button data-action="cancel-inline">Annuler</button>
+      </li>
+    `;
+  }
+  return `
+    <li>
+      <span>${escapeHtml(m.display_name)}</span>
+      ${!m.profile_id ? '<span class="badge muted">en attente</span>' : ''}
+      ${m.email ? `<a class="mail-link" href="mailto:${escapeHtml(m.email)}">✉</a>` : '<span class="badge muted">pas d\'e-mail</span>'}
+      ${isCreator ? `<button class="icon-btn" data-action="edit-member" data-id="${m.id}">✎</button>` : ''}
+      ${isCreator ? `<button class="icon-btn" data-action="remove-member" data-id="${m.id}">🗑</button>` : ''}
+    </li>
+  `;
+}
+
+function renderExpense(e, uid, isCreator) {
+  const canDelete = e.added_by === uid || isCreator;
+  return `
+    <li class="expense-item">
+      <span class="expense-label">${escapeHtml(e.label)}</span>
+      <span class="expense-amount">${formatCents(e.amount_cents)}</span>
+      <span class="expense-payer">payé par
+        ${isCreator ? `
+          <select data-action="reassign-expense" data-id="${e.id}" class="reassign-select">
+            ${S.members.map((m) => `<option value="${m.id}" ${m.id === e.member_id ? 'selected' : ''}>${escapeHtml(m.display_name)}</option>`).join('')}
+          </select>
+        ` : `<strong>${escapeHtml(nameOf(e.member_id))}</strong>`}
+      </span>
+      ${canDelete ? `<button class="icon-btn" data-action="remove-expense" data-id="${e.id}">🗑</button>` : ''}
+    </li>
+  `;
+}
+
+function renderBalance(id, cents) {
+  const cls = cents > 0 ? 'credit' : cents < 0 ? 'debt' : 'even';
+  const label = cents > 0 ? `doit recevoir ${formatCents(cents)}` : cents < 0 ? `doit ${formatCents(-cents)}` : 'à jour';
+  return `<li class="balance-item"><span>${escapeHtml(nameOf(id))}</span><span class="pill ${cls}">${label}</span></li>`;
+}
+
+function renderTransaction(t, myMember) {
+  const canDeclare = myMember && myMember.id === t.from;
+  return `
+    <li class="tx-item">
+      <span>${escapeHtml(nameOf(t.from))} → ${escapeHtml(nameOf(t.to))} : <strong>${formatCents(t.amount)}</strong></span>
+      ${canDeclare ? `<button data-action="declare-settlement" data-from="${t.from}" data-to="${t.to}" data-amount="${t.amount}">J'ai remboursé</button>` : ''}
+    </li>
+  `;
+}
+
+function renderPendingSettlements(myMember) {
+  const pending = S.settlements.filter((s) => !s.confirmed_at);
+  if (!pending.length) return '';
+  return `
+    <h3>En attente de confirmation</h3>
+    <ul class="tx-list">
+      ${pending.map((s) => {
+        const canConfirm = myMember && myMember.id === s.to_member_id;
+        return `
+          <li class="tx-item settlement">
+            <span>${escapeHtml(nameOf(s.from_member_id))} → ${escapeHtml(nameOf(s.to_member_id))} : <strong>${formatCents(s.amount_cents)}</strong> (déclaré, non confirmé)</span>
+            ${canConfirm ? `<button data-action="confirm-settlement" data-id="${s.id}">Confirmer réception</button>` : ''}
+          </li>
+        `;
+      }).join('')}
+    </ul>
+  `;
+}
+
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---------------- Events ----------------
+
+app.addEventListener('submit', async (e) => {
+  const form = e.target.closest('form[data-action]');
+  if (!form) return;
+  e.preventDefault();
+  const action = form.dataset.action;
+  const data = Object.fromEntries(new FormData(form).entries());
+
+  try {
+    if (action === 'request-otp') {
+      await api.requestOtp(data.email);
+      setState({ view: 'otp', pendingEmail: data.email, error: '' });
+    } else if (action === 'verify-otp') {
+      await api.verifyOtp(S.pendingEmail, data.token);
+      // onAuthStateChange déclenchera afterLogin()
+    } else if (action === 'set-profile-name') {
+      const profile = await api.ensureProfile(S.session.user, data.name);
+      S.profile = profile;
+      await api.claimInvites(S.session.user.email);
+      routeFromHash();
+    } else if (action === 'create-list') {
+      const list = await api.createList(data.name, !!data.isPrivate, S.profile.display_name);
+      await openList(list.id);
+    } else if (action === 'add-member') {
+      await api.addMember(S.list.id, data.name, data.email);
+      form.reset();
+    } else if (action === 'add-expense') {
+      const cents = Math.round(parseFloat(data.amount) * 100);
+      await api.addExpense(S.list.id, data.memberId, data.label, cents);
+      form.reset();
+    } else if (action === 'edit-member-inline') {
+      const id = form.dataset.id;
+      await api.updateMember(id, data.name, data.email);
+      setState({ inlineEdit: null });
+    }
+  } catch (err) {
+    setState({ error: friendlyError(err) });
+  }
+});
+
+app.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn || btn.closest('form')) return;
+  const action = btn.dataset.action;
+
+  try {
+    if (action === 'logout') {
+      await api.signOut();
+      setState({ view: 'login', session: null, profile: null });
+    } else if (action === 'back-to-login') {
+      setState({ view: 'login', error: '' });
+    } else if (action === 'copy-link') {
+      await navigator.clipboard.writeText(location.href);
+      setState({ error: '' });
+    } else if (action === 'toggle-privacy') {
+      await api.toggleListPrivacy(S.list.id, btn.dataset.private !== 'true');
+    } else if (action === 'toggle-status') {
+      await api.toggleListStatus(S.list.id, btn.dataset.status === 'open' ? 'closed' : 'open');
+    } else if (action === 'join-list') {
+      await api.joinList(S.list.id, S.profile.display_name);
+    } else if (action === 'edit-member') {
+      setState({ inlineEdit: { type: 'member', id: btn.dataset.id } });
+    } else if (action === 'remove-member') {
+      setState({ inlineEdit: { type: 'confirm-remove-member', id: btn.dataset.id } });
+    } else if (action === 'confirm-remove-member') {
+      await api.deleteMember(btn.dataset.id);
+      setState({ inlineEdit: null });
+    } else if (action === 'cancel-inline') {
+      setState({ inlineEdit: null });
+    } else if (action === 'remove-expense') {
+      await api.deleteExpense(btn.dataset.id);
+    } else if (action === 'declare-settlement') {
+      await api.declareSettlement(S.list.id, btn.dataset.from, btn.dataset.to, parseInt(btn.dataset.amount, 10));
+    } else if (action === 'confirm-settlement') {
+      await api.confirmSettlement(btn.dataset.id);
+    }
+  } catch (err) {
+    setState({ error: friendlyError(err) });
+  }
+});
+
+app.addEventListener('change', async (e) => {
+  const el = e.target.closest('[data-action="reassign-expense"]');
+  if (!el) return;
+  try {
+    await api.reassignExpense(el.dataset.id, el.value);
+  } catch (err) {
+    setState({ error: friendlyError(err) });
+  }
+});
+
+function friendlyError(err) {
+  console.error(err);
+  return err?.message || "Une erreur est survenue.";
+}
+
+boot();
