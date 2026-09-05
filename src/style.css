@@ -202,6 +202,28 @@ button:hover { opacity: 0.9; }
 .avatar-row { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
 .avatar-form { flex-direction: row; flex-wrap: wrap; gap: 0.5rem; }
 
+.nav-link { color: var(--text-muted); text-decoration: none; font-size: 0.9rem; }
+
+.avatar-wrap { position: relative; display: inline-flex; }
+.crown {
+  position: absolute;
+  top: -0.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.9rem;
+}
+
+.search-results { list-style: none; padding: 0; margin: 0.5rem 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.search-results li { display: flex; align-items: center; gap: 0.5rem; }
+
+.category-filter { display: flex; align-items: center; gap: 0.5rem; margin: 1rem 0; font-size: 0.9rem; }
+.category-filter select { padding: 0.3rem 0.5rem; }
+
+.custom-settlement-form { display: grid; grid-template-columns: 1fr 8rem auto; gap: 0.5rem; margin-top: 0.75rem; }
+@media (max-width: 640px) {
+  .custom-settlement-form { grid-template-columns: 1fr; }
+}
+
 .banner.notice {
   background: color-mix(in srgb, var(--credit) 15%, transparent);
   border: 1px solid var(--credit);

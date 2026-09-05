@@ -90,6 +90,39 @@ export async function claimInvites(email) {
     .eq('email', email);
 }
 
+// ---------- Amis ----------
+
+export async function searchProfiles(query) {
+  if (!query || query.trim().length < 2) return [];
+  const { data, error } = await supabase.rpc('search_profiles', { query: query.trim() });
+  if (error) throw error;
+  return data;
+}
+
+export async function listFriends() {
+  const { data, error } = await supabase.rpc('my_friends');
+  if (error) throw error;
+  return data;
+}
+
+export async function addFriend(friendId, category) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase
+    .from('friends')
+    .upsert({ owner_id: user.id, friend_id: friendId, category: category || 'Général' }, { onConflict: 'owner_id,friend_id' });
+  if (error) throw error;
+}
+
+export async function updateFriendCategory(friendRowId, category) {
+  const { error } = await supabase.from('friends').update({ category }).eq('id', friendRowId);
+  if (error) throw error;
+}
+
+export async function removeFriend(friendRowId) {
+  const { error } = await supabase.from('friends').delete().eq('id', friendRowId);
+  if (error) throw error;
+}
+
 // ---------- Listes ----------
 
 export async function fetchMyLists() {
@@ -104,11 +137,11 @@ export async function getList(listId) {
   return data;
 }
 
-export async function createList(name, isPrivate, creatorDisplayName) {
+export async function createList(name, isPrivate, category, creatorDisplayName) {
   const { data: { user } } = await supabase.auth.getUser();
   const { data: list, error } = await supabase
     .from('lists')
-    .insert({ name, is_private: isPrivate, created_by: user.id })
+    .insert({ name, is_private: isPrivate, category: category || null, created_by: user.id })
     .select()
     .single();
   if (error) throw error;
@@ -132,6 +165,11 @@ export async function toggleListStatus(listId, status) {
   if (error) throw error;
 }
 
+export async function updateListCategory(listId, category) {
+  const { error } = await supabase.from('lists').update({ category: category || null }).eq('id', listId);
+  if (error) throw error;
+}
+
 export async function joinList(listId, displayName) {
   const { data: { user } } = await supabase.auth.getUser();
   const { error } = await supabase.from('list_members').insert({
@@ -152,12 +190,31 @@ export async function getMembers(listId) {
   return data;
 }
 
+// Pseudo/avatar des participants déjà rattachés à un compte (pour affichage + couronne du créateur).
+export async function getMemberProfiles(listId) {
+  const { data, error } = await supabase.rpc('list_member_profiles', { p_list_id: listId });
+  if (error) throw error;
+  return data;
+}
+
 export async function addMember(listId, displayName, email) {
   const { data: { user } } = await supabase.auth.getUser();
   const { error } = await supabase.from('list_members').insert({
     list_id: listId,
     display_name: displayName,
     email: email || null,
+    added_by: user.id,
+  });
+  if (error) throw error;
+}
+
+// Ajoute directement un utilisateur existant (trouvé par recherche de pseudo), déjà rattaché.
+export async function addMemberByProfile(listId, friendProfileId, displayName) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase.from('list_members').insert({
+    list_id: listId,
+    profile_id: friendProfileId,
+    display_name: displayName,
     added_by: user.id,
   });
   if (error) throw error;

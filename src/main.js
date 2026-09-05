@@ -5,19 +5,26 @@ import { computeBalances, computeTransactions, formatCents } from './balances.js
 
 const app = document.getElementById('app');
 
+const CATEGORIES = ['Anniversaire', 'Famille', 'Professionnel', 'Voyage', 'Autre'];
+
 const S = {
   session: null,
   profile: null,
-  view: 'loading', // loading | auth | confirm-email | reset-sent | onboarding-name | home | list
+  view: 'loading', // loading | auth | confirm-email | reset-sent | onboarding-name | home | list | profile | friends
   authMode: 'login', // login | signup | forgot
   pendingEmail: '',
   error: '',
   profileNotice: '',
   lists: [],
+  homeCategory: '',
   list: null,
   members: [],
+  memberProfiles: {}, // profile_id -> { display_name, avatar_url }
+  memberSearchResults: [],
   expenses: [],
   settlements: [],
+  friends: [],
+  friendSearchResults: [],
   unsubscribe: null,
   inlineEdit: null, // { type: 'member', id } | { type: 'confirm-remove-member', id }
 };
@@ -66,11 +73,19 @@ async function routeFromHash() {
   if (location.hash === '#/profil') {
     if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
     setState({ view: 'profile', error: '', profileNotice: '' });
+  } else if (location.hash === '#/amis') {
+    await loadFriends();
   } else if (m) {
     await openList(m[1]);
   } else {
     await loadHome();
   }
+}
+
+async function loadFriends() {
+  if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
+  const friends = await api.listFriends();
+  setState({ view: 'friends', friends, friendSearchResults: [], error: '' });
 }
 
 async function loadHome() {
@@ -83,13 +98,15 @@ async function openList(listId) {
   if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
   try {
     const list = await api.getList(listId);
-    const [members, expenses, settlements] = await Promise.all([
+    const [members, expenses, settlements, memberProfilesArr] = await Promise.all([
       api.getMembers(listId),
       api.getExpenses(listId),
       api.getSettlements(listId),
+      api.getMemberProfiles(listId),
     ]);
+    const memberProfiles = Object.fromEntries(memberProfilesArr.map((p) => [p.profile_id, p]));
     S.unsubscribe = api.subscribeToList(listId, () => refreshList(listId));
-    setState({ view: 'list', list, members, expenses, settlements });
+    setState({ view: 'list', list, members, expenses, settlements, memberProfiles, memberSearchResults: [] });
     location.hash = `#/list/${listId}`;
   } catch (e) {
     setState({ view: 'home', error: "Liste introuvable ou accès non autorisé." });
@@ -97,13 +114,15 @@ async function openList(listId) {
 }
 
 async function refreshList(listId) {
-  const [list, members, expenses, settlements] = await Promise.all([
+  const [list, members, expenses, settlements, memberProfilesArr] = await Promise.all([
     api.getList(listId),
     api.getMembers(listId),
     api.getExpenses(listId),
     api.getSettlements(listId),
+    api.getMemberProfiles(listId),
   ]);
-  setState({ list, members, expenses, settlements });
+  const memberProfiles = Object.fromEntries(memberProfilesArr.map((p) => [p.profile_id, p]));
+  setState({ list, members, expenses, settlements, memberProfiles });
 }
 
 // ---------------- Render ----------------
@@ -115,6 +134,7 @@ function render() {
   else if (S.view === 'reset-sent') app.innerHTML = renderResetSent();
   else if (S.view === 'onboarding-name') app.innerHTML = renderOnboarding();
   else if (S.view === 'profile') app.innerHTML = renderTopbar() + renderProfilePage();
+  else if (S.view === 'friends') app.innerHTML = renderTopbar() + renderFriendsPage();
   else if (S.view === 'home') app.innerHTML = renderTopbar() + renderHome();
   else if (S.view === 'list') app.innerHTML = renderTopbar() + renderList();
 }
@@ -127,6 +147,7 @@ function renderTopbar() {
     <div class="topbar">
       <a href="#/" class="brand">🧾 Les Bons Comptes</a>
       <div class="profile-chip">
+        <a class="nav-link" href="#/amis">👥 Amis</a>
         <a class="profile-link" href="#/profil">${avatar}<span>${escapeHtml(S.profile?.display_name || '')}</span></a>
         <button data-action="logout">Se déconnecter</button>
       </div>
@@ -292,15 +313,64 @@ function renderProfilePage() {
   `;
 }
 
+function renderFriendsPage() {
+  const grouped = {};
+  for (const f of S.friends) {
+    (grouped[f.category] ||= []).push(f);
+  }
+  const categories = Object.keys(grouped).sort();
+
+  return `
+    <div class="page">
+      <h1>Mes amis</h1>
+
+      <div class="card">
+        <h2>Ajouter un ami</h2>
+        <input type="text" data-action="friend-search-input" placeholder="Rechercher un pseudo…" />
+        ${S.friendSearchResults.length ? `
+          <ul class="search-results">
+            ${S.friendSearchResults.map((p) => `
+              <li>
+                ${p.avatar_url ? `<img class="avatar-mini" src="${escapeHtml(p.avatar_url)}" alt="" />` : `<span class="avatar-mini avatar-placeholder">${escapeHtml(p.display_name[0].toUpperCase())}</span>`}
+                <span>${escapeHtml(p.display_name)}</span>
+                <button data-action="add-friend" data-id="${p.id}">Ajouter</button>
+              </li>
+            `).join('')}
+          </ul>
+        ` : ''}
+      </div>
+
+      ${categories.length ? categories.map((cat) => `
+        <h2>${escapeHtml(cat)}</h2>
+        <ul class="member-list">
+          ${grouped[cat].map((f) => `
+            <li>
+              ${f.avatar_url ? `<img class="avatar-mini" src="${escapeHtml(f.avatar_url)}" alt="" />` : `<span class="avatar-mini avatar-placeholder">${escapeHtml(f.display_name[0].toUpperCase())}</span>`}
+              <span>${escapeHtml(f.display_name)}</span>
+              <select data-action="update-friend-category" data-id="${f.id}">
+                ${CATEGORIES.map((c) => `<option value="${c}" ${c === f.category ? 'selected' : ''}>${c}</option>`).join('')}
+              </select>
+              <button class="icon-btn" data-action="remove-friend" data-id="${f.id}">🗑</button>
+            </li>
+          `).join('')}
+        </ul>
+      `).join('') : '<p class="muted">Aucun ami ajouté pour l\'instant.</p>'}
+    </div>
+  `;
+}
+
 function renderHome() {
-  const open = S.lists.filter((l) => l.status === 'open');
-  const closed = S.lists.filter((l) => l.status === 'closed');
+  const filtered = S.homeCategory ? S.lists.filter((l) => l.category === S.homeCategory) : S.lists;
+  const open = filtered.filter((l) => l.status === 'open');
+  const closed = filtered.filter((l) => l.status === 'closed');
+  const usedCategories = [...new Set(S.lists.map((l) => l.category).filter(Boolean))].sort();
   const listCard = (l) => `
     <a class="card list-card" href="#/list/${l.id}">
       <div class="list-card-title">${escapeHtml(l.name)}</div>
       <div class="list-card-meta">
         <span class="badge ${l.status}">${l.status === 'open' ? 'ouverte' : 'clôturée'}</span>
         <span class="badge muted">${l.is_private ? 'privée' : 'publique'}</span>
+        ${l.category ? `<span class="badge muted">${escapeHtml(l.category)}</span>` : ''}
       </div>
     </a>
   `;
@@ -310,10 +380,24 @@ function renderHome() {
         <h2>Nouvelle liste</h2>
         <form data-action="create-list" class="create-list-form">
           <input type="text" name="name" required placeholder="Ex : Week-end à Lyon" />
+          <select name="category">
+            <option value="">Sans catégorie</option>
+            ${CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join('')}
+          </select>
           <label class="checkbox"><input type="checkbox" name="isPrivate" /> Privée (accessible seulement par lien/invitation)</label>
           <button type="submit">Créer</button>
         </form>
       </div>
+
+      ${usedCategories.length ? `
+        <div class="category-filter">
+          <label>Filtrer par catégorie :</label>
+          <select data-action="filter-category">
+            <option value="">Toutes</option>
+            ${usedCategories.map((c) => `<option value="${c}" ${c === S.homeCategory ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
+          </select>
+        </div>
+      ` : ''}
 
       <h2>Mes listes en cours</h2>
       <div class="list-grid">${open.length ? open.map(listCard).join('') : '<p class="muted">Aucune liste en cours.</p>'}</div>
@@ -340,11 +424,19 @@ function renderList() {
         <div class="list-header-actions">
           <span class="badge ${list.status}">${list.status === 'open' ? 'ouverte' : 'clôturée'}</span>
           <span class="badge muted">${list.is_private ? 'privée' : 'publique'}</span>
+          ${isCreator ? `
+            <select data-action="update-list-category">
+              <option value="">Sans catégorie</option>
+              ${CATEGORIES.map((c) => `<option value="${c}" ${c === list.category ? 'selected' : ''}>${c}</option>`).join('')}
+            </select>
+          ` : list.category ? `<span class="badge muted">${escapeHtml(list.category)}</span>` : ''}
           <button data-action="copy-link">Copier le lien</button>
           ${isCreator ? `<button data-action="toggle-privacy" data-private="${list.is_private}">${list.is_private ? 'Rendre publique' : 'Rendre privée'}</button>` : ''}
           ${isCreator ? `<button data-action="toggle-status" data-status="${list.status}">${list.status === 'open' ? 'Clôturer' : 'Rouvrir'}</button>` : ''}
         </div>
       </div>
+
+      ${list.status === 'closed' ? renderSummaryMailto(list, memberIds, balances) : ''}
 
       ${!isMember && !list.is_private ? `
         <div class="card">
@@ -363,6 +455,19 @@ function renderList() {
           <input type="email" name="email" placeholder="Email (optionnel)" />
           <button type="submit">Ajouter</button>
         </form>
+        <p class="muted">Ou invite quelqu'un qui a déjà un compte :</p>
+        <input type="text" data-action="member-search-input" placeholder="Rechercher un pseudo…" />
+        ${S.memberSearchResults.length ? `
+          <ul class="search-results">
+            ${S.memberSearchResults.map((p) => `
+              <li>
+                ${p.avatar_url ? `<img class="avatar-mini" src="${escapeHtml(p.avatar_url)}" alt="" />` : `<span class="avatar-mini avatar-placeholder">${escapeHtml(p.display_name[0].toUpperCase())}</span>`}
+                <span>${escapeHtml(p.display_name)}</span>
+                <button data-action="add-member-from-search" data-id="${p.id}" data-name="${escapeHtml(p.display_name)}">Ajouter</button>
+              </li>
+            `).join('')}
+          </ul>
+        ` : ''}
       </div>
 
       <div class="card">
@@ -393,9 +498,47 @@ function renderList() {
         <h2>Remboursements suggérés</h2>
         ${transactions.length ? `<ul class="tx-list">${transactions.map((t) => renderTransaction(t, myMember)).join('')}</ul>` : '<p class="muted">Tout le monde est à jour 🎉</p>'}
         ${renderPendingSettlements(myMember)}
+        ${isMember ? `
+          <h3>Déclarer un remboursement (montant libre, aussi partiel)</h3>
+          <form data-action="declare-custom-settlement" class="custom-settlement-form">
+            <select name="toMemberId">
+              ${S.members.filter((m) => m.id !== myMember.id).map((m) => `<option value="${m.id}">${escapeHtml(m.display_name)}</option>`).join('')}
+            </select>
+            <input type="number" name="amount" required min="0.01" step="0.01" placeholder="Montant €" />
+            <button type="submit">J'ai remboursé</button>
+          </form>
+        ` : ''}
       </div>
     </div>
   `;
+}
+
+function renderSummaryMailto(list, memberIds, balances) {
+  const emails = S.members.map((m) => m.email).filter(Boolean);
+  if (!emails.length) return '';
+  const lines = memberIds.map((id) => {
+    const c = balances[id] || 0;
+    const label = c > 0 ? `doit recevoir ${formatCents(c)}` : c < 0 ? `doit ${formatCents(-c)}` : 'à jour';
+    return `${nameOf(id)} : ${label}`;
+  });
+  const subject = encodeURIComponent(`Récapitulatif — ${list.name}`);
+  const body = encodeURIComponent(`Voici le récapitulatif final de la liste "${list.name}" :\n\n${lines.join('\n')}`);
+  const bcc = encodeURIComponent(emails.join(','));
+  return `
+    <div class="card">
+      <p>Liste clôturée — tu peux envoyer un récapitulatif par email à tous les participants.</p>
+      <a href="mailto:?bcc=${bcc}&subject=${subject}&body=${body}">📧 Envoyer le récapitulatif</a>
+    </div>
+  `;
+}
+
+function renderMemberAvatar(m) {
+  const profile = m.profile_id ? S.memberProfiles[m.profile_id] : null;
+  const isCreator = m.profile_id && m.profile_id === S.list?.created_by;
+  const img = profile?.avatar_url
+    ? `<img class="avatar-mini" src="${escapeHtml(profile.avatar_url)}" alt="" />`
+    : `<span class="avatar-mini avatar-placeholder">${escapeHtml(m.display_name[0].toUpperCase())}</span>`;
+  return `<span class="avatar-wrap">${img}${isCreator ? '<span class="crown" title="Créateur de la liste">👑</span>' : ''}</span>`;
 }
 
 function renderMember(m, isCreator) {
@@ -422,6 +565,7 @@ function renderMember(m, isCreator) {
   }
   return `
     <li>
+      ${renderMemberAvatar(m)}
       <span>${escapeHtml(m.display_name)}</span>
       ${!m.profile_id ? '<span class="badge muted">en attente</span>' : ''}
       ${m.email ? `<a class="mail-link" href="mailto:${escapeHtml(m.email)}">✉</a>` : '<span class="badge muted">pas d\'e-mail</span>'}
@@ -521,7 +665,7 @@ app.addEventListener('submit', async (e) => {
       await api.claimInvites(S.session.user.email);
       routeFromHash();
     } else if (action === 'create-list') {
-      const list = await api.createList(data.name, !!data.isPrivate, S.profile.display_name);
+      const list = await api.createList(data.name, !!data.isPrivate, data.category, S.profile.display_name);
       await openList(list.id);
     } else if (action === 'add-member') {
       await api.addMember(S.list.id, data.name, data.email);
@@ -552,6 +696,11 @@ app.addEventListener('submit', async (e) => {
       await api.updatePassword(data.password);
       form.reset();
       setState({ profileNotice: 'Mot de passe mis à jour.' });
+    } else if (action === 'declare-custom-settlement') {
+      const myMember = S.members.find((m) => m.profile_id === S.session.user.id);
+      const cents = Math.round(parseFloat(data.amount) * 100);
+      await api.declareSettlement(S.list.id, myMember.id, data.toMemberId, cents);
+      form.reset();
     }
   } catch (err) {
     setState({ error: friendlyError(err) });
@@ -597,6 +746,15 @@ app.addEventListener('click', async (e) => {
       await api.declareSettlement(S.list.id, btn.dataset.from, btn.dataset.to, parseInt(btn.dataset.amount, 10));
     } else if (action === 'confirm-settlement') {
       await api.confirmSettlement(btn.dataset.id);
+    } else if (action === 'add-friend') {
+      await api.addFriend(btn.dataset.id, 'Général');
+      await loadFriends();
+    } else if (action === 'remove-friend') {
+      await api.removeFriend(btn.dataset.id);
+      await loadFriends();
+    } else if (action === 'add-member-from-search') {
+      await api.addMemberByProfile(S.list.id, btn.dataset.id, btn.dataset.name);
+      setState({ memberSearchResults: [] });
     }
   } catch (err) {
     setState({ error: friendlyError(err) });
@@ -604,13 +762,49 @@ app.addEventListener('click', async (e) => {
 });
 
 app.addEventListener('change', async (e) => {
-  const el = e.target.closest('[data-action="reassign-expense"]');
+  const el = e.target.closest('[data-action]');
   if (!el) return;
+  const action = el.dataset.action;
   try {
-    await api.reassignExpense(el.dataset.id, el.value);
+    if (action === 'reassign-expense') {
+      await api.reassignExpense(el.dataset.id, el.value);
+    } else if (action === 'update-friend-category') {
+      await api.updateFriendCategory(el.dataset.id, el.value);
+      await loadFriends();
+    } else if (action === 'update-list-category') {
+      await api.updateListCategory(S.list.id, el.value);
+    } else if (action === 'filter-category') {
+      setState({ homeCategory: el.value });
+    }
   } catch (err) {
     setState({ error: friendlyError(err) });
   }
+});
+
+let searchDebounce = null;
+app.addEventListener('input', (e) => {
+  const el = e.target.closest('[data-action="friend-search-input"], [data-action="member-search-input"]');
+  if (!el) return;
+  const action = el.dataset.action;
+  const isFriendSearch = action === 'friend-search-input';
+  const query = el.value;
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(async () => {
+    try {
+      const results = await api.searchProfiles(query);
+      if (isFriendSearch) setState({ friendSearchResults: results });
+      else setState({ memberSearchResults: results });
+      // Le re-rendu complet recrée l'input : on restaure sa valeur, le focus et le curseur.
+      const input = app.querySelector(`[data-action="${action}"]`);
+      if (input) {
+        input.value = query;
+        input.focus();
+        input.setSelectionRange(query.length, query.length);
+      }
+    } catch (err) {
+      setState({ error: friendlyError(err) });
+    }
+  }, 300);
 });
 
 function friendlyError(err) {
