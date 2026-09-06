@@ -239,9 +239,9 @@ function renderTopbar() {
         <button class="avatar-btn" data-action="toggle-profile-menu" title="Menu" aria-haspopup="true" aria-expanded="${S.profileMenuOpen ? 'true' : 'false'}">${avatar}</button>
         ${S.profileMenuOpen ? `
           <div class="profile-menu">
-            <a href="#/" data-action="close-profile-menu">🧾 Mes listes</a>
+            <a href="#/profil" data-action="close-profile-menu" data-tab="listes">🧾 Mes listes</a>
             <a href="#/amis" data-action="close-profile-menu">👥 Mes amis</a>
-            <a href="#/profil" data-action="close-profile-menu">👤 Mon profil</a>
+            <a href="#/profil" data-action="close-profile-menu" data-tab="compte">👤 Mon profil</a>
             <button data-action="logout">🚪 Se déconnecter</button>
           </div>
         ` : ''}
@@ -1224,7 +1224,9 @@ app.addEventListener('click', async (e) => {
     // annule silencieusement la navigation par défaut.
     e.preventDefault();
     const href = btn.getAttribute('href');
-    setState({ profileMenuOpen: false });
+    const patch = { profileMenuOpen: false };
+    if (btn.dataset.tab) patch.profileTab = btn.dataset.tab;
+    setState(patch);
     if (href) location.hash = href;
     return;
   }
