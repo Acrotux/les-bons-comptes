@@ -81,15 +81,17 @@ async function boot() {
     return;
   }
   const session = await api.getSession();
+  // onAuthStateChange se déclenche aussi immédiatement avec la session déjà connue (pas
+  // seulement sur un futur changement) : on ne rappelle donc PAS afterLogin() ici en plus,
+  // pour éviter deux chargements concurrents de la même page au démarrage (particulièrement
+  // visible sur une liste : le second appel désabonne le premier du temps réel en plein
+  // chargement, et si l'un des deux échoue après l'autre, son erreur écrase le bon résultat).
   api.onAuthStateChange((session) => {
     S.session = session;
     if (session) afterLogin();
     else if (S.view !== 'reset-sent') setState({ view: 'auth', authMode: 'login', profile: null });
   });
-  if (session) {
-    S.session = session;
-    await afterLogin();
-  } else {
+  if (!session) {
     const authMode = location.hash === '#inscription' ? 'signup' : 'login';
     setState({ view: 'auth', authMode });
   }
@@ -175,7 +177,14 @@ async function loadHome() {
   setState({ view: 'home', lists, pendingListInvites, list: null });
 }
 
+// Si deux appels à openList se chevauchent (ex. double déclenchement de la restauration de
+// session au démarrage), seul le résultat du DERNIER appel en date doit s'appliquer — sinon
+// le premier peut écraser le bon résultat du second après coup (ou l'inverse), y compris en
+// cas d'erreur.
+let listLoadToken = 0;
+
 async function openList(listId, requestedTab) {
+  const myToken = ++listLoadToken;
   if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
   try {
     const list = await api.getList(listId);
@@ -187,6 +196,7 @@ async function openList(listId, requestedTab) {
       api.getSettlements(listId),
       api.getMemberProfiles(listId),
     ]);
+    if (myToken !== listLoadToken) return;
     const memberProfiles = Object.fromEntries(memberProfilesArr.map((p) => [p.profile_id, p]));
     const listTab = LIST_TABS.some((t) => t.key === requestedTab) ? requestedTab : 'apercu';
     S.unsubscribe = api.subscribeToList(listId, () => refreshList(listId));
@@ -195,6 +205,7 @@ async function openList(listId, requestedTab) {
     // relancerait tout le chargement ci-dessus une deuxième fois.
     history.replaceState(null, '', `#/list/${listId}/${listTab}`);
   } catch (e) {
+    if (myToken !== listLoadToken) return;
     setState({ view: 'home', error: "Liste introuvable ou accès non autorisé." });
   }
 }
