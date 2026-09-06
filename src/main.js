@@ -971,9 +971,11 @@ async function handleReceiptFileOcr(input) {
     const cents = await extractTotalFromImage(file);
     if (!document.body.contains(statusEl)) return;
     const amountInput = form.querySelector('input[name="payerAmount"]');
-    if (cents != null) {
-      if (amountInput && !amountInput.value) amountInput.value = (cents / 100).toFixed(2);
+    if (cents != null && amountInput && !amountInput.value) {
+      amountInput.value = (cents / 100).toFixed(2);
       statusEl.textContent = "✓ Montant détecté automatiquement — vérifie qu'il est correct.";
+    } else if (cents != null) {
+      statusEl.textContent = `Montant détecté sur le ticket (${formatCents(cents)}), mais tu as déjà renseigné le tien.`;
     } else {
       statusEl.textContent = 'Montant non détecté automatiquement, renseigne-le toi-même.';
     }
@@ -994,9 +996,11 @@ async function runReceiptOcr(receiptId, storagePath) {
     const cents = await extractTotalFromImage(url);
     if (S.attributingReceiptId !== receiptId) return; // formulaire fermé/changé entre-temps
     const amountInput = form()?.querySelector('input[name="payerAmount"]');
-    if (cents != null) {
-      if (amountInput && !amountInput.value) amountInput.value = (cents / 100).toFixed(2);
+    if (cents != null && amountInput && !amountInput.value) {
+      amountInput.value = (cents / 100).toFixed(2);
       if (statusEl()) statusEl().textContent = "✓ Montant détecté automatiquement — vérifie qu'il est correct.";
+    } else if (cents != null) {
+      if (statusEl()) statusEl().textContent = `Montant détecté sur le ticket (${formatCents(cents)}), mais tu as déjà renseigné le tien.`;
     } else if (statusEl()) {
       statusEl().textContent = 'Montant non détecté automatiquement, renseigne-le toi-même.';
     }
