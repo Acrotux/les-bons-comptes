@@ -1219,8 +1219,14 @@ app.addEventListener('click', async (e) => {
     return;
   }
   if (btn.dataset.action === 'close-profile-menu') {
+    // On navigue nous-mêmes puis on ferme le menu : re-rendre l'app tout de suite (via
+    // setState) détache ce lien du DOM avant que le navigateur n'ait suivi son href, ce qui
+    // annule silencieusement la navigation par défaut.
+    e.preventDefault();
+    const href = btn.getAttribute('href');
     setState({ profileMenuOpen: false });
-    return; // le lien garde son comportement de navigation par défaut
+    if (href) location.hash = href;
+    return;
   }
 
   if (btn.closest('form')) return;
