@@ -7,6 +7,14 @@ const app = document.getElementById('app');
 
 const CATEGORIES = ['Anniversaire', 'Famille', 'Professionnel', 'Voyage', 'Autre'];
 
+const LIST_TABS = [
+  { key: 'apercu', label: '📊 Aperçu' },
+  { key: 'participants', label: 'Participants' },
+  { key: 'depenses', label: 'Dépenses' },
+  { key: 'soldes', label: 'Soldes' },
+  { key: 'remboursements', label: 'Remboursements suggérés' },
+];
+
 const S = {
   session: null,
   profile: null,
@@ -104,7 +112,7 @@ async function routeFromHash() {
     setState({ view: LEGAL_VIEWS[location.hash] });
     return;
   }
-  const mList = location.hash.match(/^#\/list\/([a-f0-9-]+)/i);
+  const mList = location.hash.match(/^#\/list\/([a-f0-9-]+)(?:\/([a-z]+))?/i);
   const mAddFriend = location.hash.match(/^#\/ajouter\/([a-f0-9-]+)/i);
   if (location.hash === '#/profil') {
     await loadProfile();
@@ -113,7 +121,7 @@ async function routeFromHash() {
   } else if (mAddFriend) {
     await openAddFriendLink(mAddFriend[1]);
   } else if (mList) {
-    await openList(mList[1]);
+    await openList(mList[1], mList[2]);
   } else {
     await loadHome();
   }
@@ -167,7 +175,7 @@ async function loadHome() {
   setState({ view: 'home', lists, pendingListInvites, list: null });
 }
 
-async function openList(listId) {
+async function openList(listId, requestedTab) {
   if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
   try {
     const list = await api.getList(listId);
@@ -180,9 +188,12 @@ async function openList(listId) {
       api.getMemberProfiles(listId),
     ]);
     const memberProfiles = Object.fromEntries(memberProfilesArr.map((p) => [p.profile_id, p]));
+    const listTab = LIST_TABS.some((t) => t.key === requestedTab) ? requestedTab : 'apercu';
     S.unsubscribe = api.subscribeToList(listId, () => refreshList(listId));
-    setState({ view: 'list', list, members, expenses, expensePayers, pendingReceipts, settlements, memberProfiles, memberSearchResults: [], listTab: 'apercu' });
-    location.hash = `#/list/${listId}`;
+    setState({ view: 'list', list, members, expenses, expensePayers, pendingReceipts, settlements, memberProfiles, memberSearchResults: [], listTab });
+    // replaceState (pas location.hash =) pour ne pas déclencher un second hashchange qui
+    // relancerait tout le chargement ci-dessus une deuxième fois.
+    history.replaceState(null, '', `#/list/${listId}/${listTab}`);
   } catch (e) {
     setState({ view: 'home', error: "Liste introuvable ou accès non autorisé." });
   }
@@ -679,14 +690,7 @@ function renderList() {
     (payersByExpense[p.expense_id] ||= []).push(p);
   }
 
-  const listTabs = [
-    { key: 'apercu', label: '📊 Aperçu' },
-    { key: 'participants', label: 'Participants' },
-    { key: 'depenses', label: 'Dépenses' },
-    { key: 'soldes', label: 'Soldes' },
-    { key: 'remboursements', label: 'Remboursements suggérés' },
-  ];
-  const activeTab = listTabs.some((t) => t.key === S.listTab) ? S.listTab : 'apercu';
+  const activeTab = LIST_TABS.some((t) => t.key === S.listTab) ? S.listTab : 'apercu';
 
   let tabContent;
   if (activeTab === 'apercu') {
@@ -796,7 +800,7 @@ function renderList() {
       ` : ''}
 
       <div class="tabs">
-        ${listTabs.map((t) => `<button class="tab ${t.key === activeTab ? 'active' : ''}" data-action="switch-list-tab" data-tab="${t.key}">${escapeHtml(t.label)}</button>`).join('')}
+        ${LIST_TABS.map((t) => `<button class="tab ${t.key === activeTab ? 'active' : ''}" data-action="switch-list-tab" data-tab="${t.key}">${escapeHtml(t.label)}</button>`).join('')}
       </div>
 
       ${tabContent}
@@ -1325,6 +1329,7 @@ app.addEventListener('click', async (e) => {
       await api.declineListInvite(btn.dataset.id);
       await loadHome();
     } else if (action === 'switch-list-tab') {
+      history.replaceState(null, '', `#/list/${S.list.id}/${btn.dataset.tab}`);
       setState({ listTab: btn.dataset.tab });
     } else if (action === 'ask-delete-account') {
       setState({ confirmDeleteAccount: true });
