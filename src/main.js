@@ -21,6 +21,7 @@ const S = {
   pendingListInvites: [],
   homeTab: 'toutes',
   profileTab: 'compte',
+  profileMenuOpen: false,
   list: null,
   listTab: 'apercu',
   members: [],
@@ -98,6 +99,7 @@ async function afterLogin() {
 }
 
 async function routeFromHash() {
+  S.profileMenuOpen = false;
   if (LEGAL_VIEWS[location.hash]) {
     setState({ view: LEGAL_VIEWS[location.hash] });
     return;
@@ -233,11 +235,16 @@ function renderTopbar() {
   return `
     <div class="topbar">
       <a href="#/" class="brand">🧾 Les Bons Comptes</a>
-      <div class="profile-chip">
-        <a class="profile-link" href="#/profil" title="Paramètres">
-          ${avatar}<span class="settings-gear" aria-hidden="true">⚙️</span>
-        </a>
-        <button data-action="logout">Se déconnecter</button>
+      <div class="profile-menu-wrap">
+        <button class="avatar-btn" data-action="toggle-profile-menu" title="Menu" aria-haspopup="true" aria-expanded="${S.profileMenuOpen ? 'true' : 'false'}">${avatar}</button>
+        ${S.profileMenuOpen ? `
+          <div class="profile-menu">
+            <a href="#/" data-action="close-profile-menu">🧾 Mes listes</a>
+            <a href="#/amis" data-action="close-profile-menu">👥 Mes amis</a>
+            <a href="#/profil" data-action="close-profile-menu">👤 Mon profil</a>
+            <button data-action="logout">🚪 Se déconnecter</button>
+          </div>
+        ` : ''}
       </div>
     </div>
     ${S.error ? `<div class="banner error">${escapeHtml(S.error)}</div>` : ''}
@@ -1207,6 +1214,14 @@ app.addEventListener('click', async (e) => {
     setState({ inlineEdit: null });
     return;
   }
+  if (btn.dataset.action === 'toggle-profile-menu') {
+    setState({ profileMenuOpen: !S.profileMenuOpen });
+    return;
+  }
+  if (btn.dataset.action === 'close-profile-menu') {
+    setState({ profileMenuOpen: false });
+    return; // le lien garde son comportement de navigation par défaut
+  }
 
   if (btn.closest('form')) return;
   const action = btn.dataset.action;
@@ -1214,7 +1229,7 @@ app.addEventListener('click', async (e) => {
   try {
     if (action === 'logout') {
       await api.signOut();
-      setState({ view: 'auth', authMode: 'login', session: null, profile: null });
+      setState({ view: 'auth', authMode: 'login', session: null, profile: null, profileMenuOpen: false });
     } else if (action === 'show-login') {
       setState({ view: 'auth', authMode: 'login', error: '' });
     } else if (action === 'show-signup') {
@@ -1376,5 +1391,13 @@ function friendlyError(err) {
   const msg = err?.message || '';
   return ERROR_TRANSLATIONS[msg] || msg || 'Une erreur est survenue.';
 }
+
+// Ferme le menu du profil au clic en dehors (le clic sur son propre bouton d'ouverture est
+// géré directement par le handler ci-dessus, donc pas de conflit d'ordre).
+document.addEventListener('click', (e) => {
+  if (S.profileMenuOpen && !e.target.closest('.profile-menu-wrap')) {
+    setState({ profileMenuOpen: false });
+  }
+});
 
 boot();
