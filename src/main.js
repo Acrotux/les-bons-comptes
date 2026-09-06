@@ -104,9 +104,7 @@ async function routeFromHash() {
   const mList = location.hash.match(/^#\/list\/([a-f0-9-]+)/i);
   const mAddFriend = location.hash.match(/^#\/ajouter\/([a-f0-9-]+)/i);
   if (location.hash === '#/profil') {
-    if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
-    const lists = await api.fetchMyLists();
-    setState({ view: 'profile', lists, error: '', profileNotice: '' });
+    await loadProfile();
   } else if (location.hash === '#/amis') {
     await loadFriends();
   } else if (mAddFriend) {
@@ -118,9 +116,21 @@ async function routeFromHash() {
   }
 }
 
+async function fetchFriendsData() {
+  const [friends, pendingInvites] = await Promise.all([api.listFriends(), api.listPendingFriendInvites()]);
+  return { friends, pendingInvites };
+}
+
+// Recharge les données d'amis sans changer de vue — utilisé après une action (ajouter,
+// retirer, catégoriser...) qui peut être déclenchée depuis la page Amis ou depuis le profil.
+async function refreshFriends() {
+  const { friends, pendingInvites } = await fetchFriendsData();
+  setState({ friends, pendingInvites });
+}
+
 async function loadFriends() {
   if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
-  const [friends, pendingInvites] = await Promise.all([api.listFriends(), api.listPendingFriendInvites()]);
+  const { friends, pendingInvites } = await fetchFriendsData();
   setState({
     view: 'friends',
     friends,
@@ -130,6 +140,23 @@ async function loadFriends() {
     friendSearchNoMatch: false,
     friendsNotice: '',
     error: '',
+  });
+}
+
+async function loadProfile() {
+  if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
+  const [lists, { friends, pendingInvites }] = await Promise.all([api.fetchMyLists(), fetchFriendsData()]);
+  setState({
+    view: 'profile',
+    lists,
+    friends,
+    pendingInvites,
+    friendSearchResults: [],
+    friendSearchQuery: '',
+    friendSearchNoMatch: false,
+    friendsNotice: '',
+    error: '',
+    profileNotice: '',
   });
 }
 
@@ -390,9 +417,6 @@ function renderOnboarding() {
 function renderProfilePage() {
   const p = S.profile;
   const avatar = renderAvatar(p?.avatar_url, p?.display_name, 'large');
-  const open = S.lists.filter((l) => l.status === 'open');
-  const closed = S.lists.filter((l) => l.status === 'closed');
-  const link = inviteLinkFor(p.id);
   return `
     <div class="page">
       <h1>Mon profil</h1>
@@ -434,27 +458,12 @@ function renderProfilePage() {
         </form>
       </div>
 
-      <div class="card">
-        <h2>Mes amis</h2>
-        <p class="muted">Retrouve ici tes amis classés par catégorie, tes invitations en attente, et ton lien d'invitation.</p>
-        <a class="link-btn" href="#/amis">Gérer mes amis →</a>
-      </div>
+      <h2>Mes amis</h2>
+      ${renderFriendsSections()}
 
-      <div class="card">
-        <h2>Mes listes de dépense</h2>
-        <p>${open.length ? `${open.length} liste${open.length > 1 ? 's' : ''} en cours` : 'Aucune liste en cours.'}</p>
-        ${closed.length ? `<p class="muted">${closed.length} clôturée${closed.length > 1 ? 's' : ''} dans l'historique</p>` : ''}
-        <a class="link-btn" href="#/">Voir toutes mes listes →</a>
-      </div>
-
-      <div class="card">
-        <h2>Ton lien d'invitation</h2>
-        <p class="muted">Partage ce lien : quiconque l'ouvre après s'être connecté peut t'ajouter directement en ami.</p>
-        <div class="invite-link-row">
-          <input type="text" readonly value="${escapeHtml(link)}" id="profile-invite-link" />
-          <button type="button" data-action="copy-invite-link" data-target="profile-invite-link">Copier</button>
-        </div>
-      </div>
+      <h2>Mes listes de dépense</h2>
+      ${renderMyListsSection()}
+      <a class="link-btn" href="#/">+ Créer une nouvelle liste →</a>
 
       <div class="card danger-zone">
         <h2>Zone dangereuse</h2>
@@ -476,7 +485,9 @@ function renderProfilePage() {
   `;
 }
 
-function renderFriendsPage() {
+// Recherche/ajout, lien d'invitation, invitations en attente et liste par catégorie —
+// utilisé aussi bien sur la page dédiée (#/amis) que dans la page de profil.
+function renderFriendsSections() {
   const grouped = {};
   for (const f of S.friends) {
     (grouped[f.category] ||= []).push(f);
@@ -486,74 +497,80 @@ function renderFriendsPage() {
   const link = inviteLinkFor(S.profile.id);
 
   return `
-    <div class="page">
-      <h1>Mes amis</h1>
-      ${S.friendsNotice ? `<div class="banner notice">${escapeHtml(S.friendsNotice)}</div>` : ''}
+    ${S.friendsNotice ? `<div class="banner notice">${escapeHtml(S.friendsNotice)}</div>` : ''}
 
-      <datalist id="friend-category-options">
-        ${ownCategories.map((c) => `<option value="${escapeHtml(c)}"></option>`).join('')}
-      </datalist>
+    <datalist id="friend-category-options">
+      ${ownCategories.map((c) => `<option value="${escapeHtml(c)}"></option>`).join('')}
+    </datalist>
 
-      <div class="card">
-        <h2>Ajouter un ami</h2>
-        <p class="muted">Cherche un pseudo ou un email déjà inscrit, ou partage ton lien d'invitation ci-dessous.</p>
-        <div class="field-stack">
-          <input type="text" data-action="friend-search-input" placeholder="Rechercher un pseudo ou un email…" />
-          <label class="muted">Catégorie pour ce nouvel ami (optionnel, tu peux créer la tienne)</label>
-          <input type="text" id="new-friend-category" list="friend-category-options" placeholder="Ex : Famille, Collègues, Rugby…" />
-        </div>
-        ${S.friendSearchResults.length ? `
-          <ul class="search-results">
-            ${S.friendSearchResults.map((p) => `
-              <li>
-                ${renderAvatar(p.avatar_url, p.display_name, 'mini')}
-                <span>${escapeHtml(p.display_name)}</span>
-                <button data-action="add-friend" data-id="${p.id}">Ajouter</button>
-              </li>
-            `).join('')}
-          </ul>
-        ` : ''}
-        ${S.friendSearchNoMatch ? `
-          <p class="muted">Personne n'a de compte avec cet email pour l'instant. En l'invitant, ton client mail s'ouvrira avec un message prêt à envoyer.</p>
-          <button data-action="invite-friend-by-email" data-email="${escapeHtml(S.friendSearchQuery)}">Inviter ${escapeHtml(S.friendSearchQuery)} par email</button>
-        ` : ''}
+    <div class="card">
+      <h3>Ajouter un ami</h3>
+      <p class="muted">Cherche un pseudo ou un email déjà inscrit, ou partage ton lien d'invitation ci-dessous.</p>
+      <div class="field-stack">
+        <input type="text" data-action="friend-search-input" placeholder="Rechercher un pseudo ou un email…" />
+        <label class="muted">Catégorie pour ce nouvel ami (optionnel, tu peux créer la tienne)</label>
+        <input type="text" id="new-friend-category" list="friend-category-options" placeholder="Ex : Famille, Collègues, Rugby…" />
       </div>
-
-      <div class="card">
-        <h2>Ton lien d'invitation</h2>
-        <p class="muted">Partage ce lien : la personne qui l'ouvre (après s'être connectée) peut t'ajouter en ami directement, sans connaître ton email.</p>
-        <div class="invite-link-row">
-          <input type="text" readonly value="${escapeHtml(link)}" id="friends-invite-link" />
-          <button type="button" data-action="copy-invite-link" data-target="friends-invite-link">Copier</button>
-        </div>
-      </div>
-
-      ${S.pendingInvites.length ? `
-        <h2>Invitations en attente</h2>
-        <ul class="member-list">
-          ${S.pendingInvites.map((inv) => `
+      ${S.friendSearchResults.length ? `
+        <ul class="search-results">
+          ${S.friendSearchResults.map((p) => `
             <li>
-              <span>${escapeHtml(inv.email)}</span>
-              <span class="badge muted">en attente</span>
-              <button class="icon-btn" data-action="cancel-friend-invite" data-id="${inv.id}" title="Annuler l'invitation">🗑</button>
+              ${renderAvatar(p.avatar_url, p.display_name, 'mini')}
+              <span>${escapeHtml(p.display_name)}</span>
+              <button data-action="add-friend" data-id="${p.id}">Ajouter</button>
             </li>
           `).join('')}
         </ul>
       ` : ''}
+      ${S.friendSearchNoMatch ? `
+        <p class="muted">Personne n'a de compte avec cet email pour l'instant. En l'invitant, ton client mail s'ouvrira avec un message prêt à envoyer.</p>
+        <button data-action="invite-friend-by-email" data-email="${escapeHtml(S.friendSearchQuery)}">Inviter ${escapeHtml(S.friendSearchQuery)} par email</button>
+      ` : ''}
+    </div>
 
-      ${categories.length ? categories.map((cat) => `
-        <h2>${escapeHtml(cat)}</h2>
-        <ul class="member-list">
-          ${grouped[cat].map((f) => `
-            <li>
-              ${renderAvatar(f.avatar_url, f.display_name, 'mini')}
-              <span>${escapeHtml(f.display_name)}</span>
-              <input type="text" list="friend-category-options" data-action="update-friend-category" data-id="${f.id}" value="${escapeHtml(f.category)}" />
-              <button class="icon-btn" data-action="remove-friend" data-id="${f.id}" title="Retirer cet ami">🗑</button>
-            </li>
-          `).join('')}
-        </ul>
-      `).join('') : '<p class="muted">Aucun ami ajouté pour l\'instant.</p>'}
+    <div class="card">
+      <h3>Ton lien d'invitation</h3>
+      <p class="muted">Partage ce lien : la personne qui l'ouvre (après s'être connectée) peut t'ajouter en ami directement, sans connaître ton email.</p>
+      <div class="invite-link-row">
+        <input type="text" readonly value="${escapeHtml(link)}" id="friends-invite-link" />
+        <button type="button" data-action="copy-invite-link" data-target="friends-invite-link">Copier</button>
+      </div>
+    </div>
+
+    ${S.pendingInvites.length ? `
+      <h3>Invitations en attente</h3>
+      <ul class="member-list">
+        ${S.pendingInvites.map((inv) => `
+          <li>
+            <span>${escapeHtml(inv.email)}</span>
+            <span class="badge muted">en attente</span>
+            <button class="icon-btn" data-action="cancel-friend-invite" data-id="${inv.id}" title="Annuler l'invitation">🗑</button>
+          </li>
+        `).join('')}
+      </ul>
+    ` : ''}
+
+    ${categories.length ? categories.map((cat) => `
+      <h3>${escapeHtml(cat)}</h3>
+      <ul class="member-list">
+        ${grouped[cat].map((f) => `
+          <li>
+            ${renderAvatar(f.avatar_url, f.display_name, 'mini')}
+            <span>${escapeHtml(f.display_name)}</span>
+            <input type="text" list="friend-category-options" data-action="update-friend-category" data-id="${f.id}" value="${escapeHtml(f.category)}" />
+            <button class="icon-btn" data-action="remove-friend" data-id="${f.id}" title="Retirer cet ami">🗑</button>
+          </li>
+        `).join('')}
+      </ul>
+    `).join('') : '<p class="muted">Aucun ami ajouté pour l\'instant.</p>'}
+  `;
+}
+
+function renderFriendsPage() {
+  return `
+    <div class="page">
+      <h1>Mes amis</h1>
+      ${renderFriendsSections()}
     </div>
   `;
 }
@@ -588,6 +605,31 @@ function renderAddFriendLink() {
   `;
 }
 
+function renderListCard(l) {
+  return `
+    <a class="card list-card" href="#/list/${l.id}">
+      <div class="list-card-title">${escapeHtml(l.name)}</div>
+      <div class="list-card-meta">
+        <span class="badge ${l.status}">${l.status === 'open' ? 'ouverte' : 'clôturée'}</span>
+        <span class="badge muted">${l.is_private ? 'privée' : 'publique'}</span>
+        ${l.category ? `<span class="badge muted">${escapeHtml(l.category)}</span>` : ''}
+      </div>
+    </a>
+  `;
+}
+
+// Toutes les listes en cours et l'historique, sans filtre par catégorie — utilisé dans la
+// page de profil comme sur la page d'accueil.
+function renderMyListsSection() {
+  const open = S.lists.filter((l) => l.status === 'open');
+  const closed = S.lists.filter((l) => l.status === 'closed');
+  return `
+    <h3>Listes en cours</h3>
+    <div class="list-grid">${open.length ? open.map(renderListCard).join('') : '<p class="muted">Aucune liste en cours.</p>'}</div>
+    ${closed.length ? `<h3>Historique</h3><div class="list-grid">${closed.map(renderListCard).join('')}</div>` : '<p class="muted">Aucune liste clôturée pour l\'instant.</p>'}
+  `;
+}
+
 function renderHome() {
   const usedCategories = [...new Set(S.lists.map((l) => l.category).filter(Boolean))].sort();
   const hasUncategorized = S.lists.some((l) => !l.category);
@@ -598,17 +640,6 @@ function renderHome() {
   ];
   const activeTab = tabs.some((t) => t.key === S.homeTab) ? S.homeTab : 'toutes';
 
-  const listCard = (l) => `
-    <a class="card list-card" href="#/list/${l.id}">
-      <div class="list-card-title">${escapeHtml(l.name)}</div>
-      <div class="list-card-meta">
-        <span class="badge ${l.status}">${l.status === 'open' ? 'ouverte' : 'clôturée'}</span>
-        <span class="badge muted">${l.is_private ? 'privée' : 'publique'}</span>
-        ${l.category ? `<span class="badge muted">${escapeHtml(l.category)}</span>` : ''}
-      </div>
-    </a>
-  `;
-
   const filtered = activeTab === 'toutes'
     ? S.lists
     : activeTab === '__none__'
@@ -618,8 +649,8 @@ function renderHome() {
   const closed = filtered.filter((l) => l.status === 'closed');
   const tabContent = `
     <h2>Listes en cours</h2>
-    <div class="list-grid">${open.length ? open.map(listCard).join('') : '<p class="muted">Aucune liste en cours.</p>'}</div>
-    ${closed.length ? `<h2>Historique</h2><div class="list-grid">${closed.map(listCard).join('')}</div>` : ''}
+    <div class="list-grid">${open.length ? open.map(renderListCard).join('') : '<p class="muted">Aucune liste en cours.</p>'}</div>
+    ${closed.length ? `<h2>Historique</h2><div class="list-grid">${closed.map(renderListCard).join('')}</div>` : ''}
   `;
 
   return `
@@ -1206,14 +1237,14 @@ app.addEventListener('click', async (e) => {
     } else if (action === 'add-friend') {
       const category = app.querySelector('#new-friend-category')?.value.trim();
       await api.addFriend(btn.dataset.id, category);
-      await loadFriends();
+      await refreshFriends();
     } else if (action === 'add-friend-from-link') {
       await api.addFriend(btn.dataset.id, '');
       await loadFriends();
       setState({ friendsNotice: `${btn.dataset.name} a été ajouté·e à tes amis.` });
     } else if (action === 'remove-friend') {
       await api.removeFriend(btn.dataset.id);
-      await loadFriends();
+      await refreshFriends();
     } else if (action === 'invite-friend-by-email') {
       const category = app.querySelector('#new-friend-category')?.value.trim();
       const email = btn.dataset.email;
@@ -1224,10 +1255,10 @@ app.addEventListener('click', async (e) => {
         `Salut !\n\n${S.profile.display_name} t'invite à rejoindre "Les Bons Comptes" pour gérer vos dépenses partagées.\n\nCrée ton compte ici : ${appUrl}\n\nUtilise bien cette adresse email (${email}) à l'inscription pour être automatiquement ajouté à sa liste d'amis.`
       );
       window.location.href = `mailto:${encodeURIComponent(email)}?subject=${subject}&body=${body}`;
-      await loadFriends();
+      await refreshFriends();
     } else if (action === 'cancel-friend-invite') {
       await api.cancelFriendInvite(btn.dataset.id);
-      await loadFriends();
+      await refreshFriends();
     } else if (action === 'add-member-from-search') {
       await api.addMemberByProfile(S.list.id, btn.dataset.id, btn.dataset.name);
       setState({ memberSearchResults: [] });
@@ -1263,7 +1294,7 @@ app.addEventListener('change', async (e) => {
       await api.reassignExpensePayer(el.dataset.id, el.value);
     } else if (action === 'update-friend-category') {
       await api.updateFriendCategory(el.dataset.id, el.value);
-      await loadFriends();
+      await refreshFriends();
     } else if (action === 'update-list-category') {
       await api.updateListCategory(S.list.id, el.value);
     }
