@@ -74,7 +74,7 @@ function inviteLinkFor(profileId) {
 
 // ---------------- Boot ----------------
 
-const LEGAL_VIEWS = { '#/mentions-legales': 'legal-mentions', '#/confidentialite': 'legal-privacy' };
+const LEGAL_VIEWS = { '#/mentions-legales': 'legal-mentions', '#/confidentialite': 'legal-privacy', '#/a-propos': 'about' };
 
 async function boot() {
   window.addEventListener('hashchange', routeFromHash);
@@ -238,6 +238,7 @@ function render() {
   else if (S.view === 'confirm-email') html = renderConfirmEmail();
   else if (S.view === 'reset-sent') html = renderResetSent();
   else if (S.view === 'account-deleted') html = renderAccountDeleted();
+  else if (S.view === 'about') html = renderAboutPage();
   else if (S.view === 'legal-mentions') html = renderLegalMentions();
   else if (S.view === 'legal-privacy') html = renderLegalPrivacy();
   else if (S.view === 'onboarding-name') html = renderOnboarding();
@@ -266,6 +267,7 @@ function renderTopbar() {
             <a href="#/" data-action="close-profile-menu">🧾 Mes listes</a>
             <a href="#/amis" data-action="close-profile-menu">👥 Mes amis</a>
             <a href="#/profil" data-action="close-profile-menu">👤 Mon profil</a>
+            <a href="#/a-propos" data-action="close-profile-menu">ℹ️ À propos</a>
             <button data-action="logout">🚪 Se déconnecter</button>
           </div>
         ` : ''}
@@ -283,7 +285,7 @@ function renderAuth() {
 
 const AUTH_LEGAL_FOOTER = `
   <p class="legal-footer muted">
-    <a href="#/mentions-legales">Mentions légales</a> · <a href="#/confidentialite">Confidentialité</a>
+    <a href="#/a-propos">À propos</a> · <a href="#/mentions-legales">Mentions légales</a> · <a href="#/confidentialite">Confidentialité</a>
   </p>
 `;
 
@@ -382,6 +384,36 @@ function renderAccountDeleted() {
         <p class="muted">Ton compte a été anonymisé et la connexion définitivement bloquée. Merci d'avoir utilisé Les Bons Comptes.</p>
         <button class="link-btn" data-action="show-login">Retour à l'accueil</button>
       </div>
+    </div>
+  `;
+}
+
+function renderAboutPage() {
+  const date = new Date(__BUILD_DATE__).toLocaleDateString('fr-FR');
+  return `
+    <div class="page legal-page">
+      <h1>🧾 À propos de Les Bons Comptes</h1>
+      <p class="muted">Version ${__APP_VERSION__} · Dernière mise à jour le ${date}</p>
+
+      <p>Les Bons Comptes est une application pour gérer facilement les dépenses partagées entre amis, en famille ou en colocation : listes de dépenses, remboursements (même partiels), justificatifs (tickets de caisse, factures), et calcul automatique de qui doit quoi à qui.</p>
+
+      <h2>Code source</h2>
+      <p>Le code de cette application est visible publiquement sur GitHub : <a href="https://github.com/Acrotux/les-bons-comptes" target="_blank" rel="noopener">github.com/Acrotux/les-bons-comptes</a>.</p>
+
+      <h2>Bibliothèques et services utilisés</h2>
+      <ul>
+        <li><a href="https://supabase.com" target="_blank" rel="noopener">Supabase</a> — base de données, authentification et stockage des fichiers.</li>
+        <li><a href="https://vite.dev" target="_blank" rel="noopener">Vite</a> — outil de développement et de construction du site.</li>
+        <li><a href="https://tesseract.projectnaptha.com" target="_blank" rel="noopener">Tesseract.js</a> — lecture automatique du montant sur un ticket/facture (OCR libre et open source, exécuté entièrement dans ton navigateur).</li>
+        <li><a href="https://fonts.google.com/specimen/IBM+Plex+Sans" target="_blank" rel="noopener">IBM Plex</a> (Google Fonts) — polices de caractères.</li>
+        <li><a href="https://pages.github.com" target="_blank" rel="noopener">GitHub Pages</a> — hébergement du site.</li>
+      </ul>
+
+      <h2>En savoir plus</h2>
+      <p><a href="#/mentions-legales">Mentions légales</a> · <a href="#/confidentialite">Politique de confidentialité</a></p>
+      <p class="muted">Une question, un bug à signaler ? <a href="mailto:cartoux.j@gmail.com">cartoux.j@gmail.com</a></p>
+
+      <button class="link-btn" data-action="legal-back">&larr; Retour</button>
     </div>
   `;
 }
