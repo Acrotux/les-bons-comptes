@@ -19,7 +19,6 @@ const S = {
   confirmDeleteAccount: false,
   lists: [],
   pendingListInvites: [],
-  profileTab: 'compte',
   profileMenuOpen: false,
   list: null,
   listTab: 'apercu',
@@ -147,19 +146,7 @@ async function loadFriends() {
 
 async function loadProfile() {
   if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
-  const [lists, { friends, pendingInvites }] = await Promise.all([api.fetchMyLists(), fetchFriendsData()]);
-  setState({
-    view: 'profile',
-    lists,
-    friends,
-    pendingInvites,
-    friendSearchResults: [],
-    friendSearchQuery: '',
-    friendSearchNoMatch: false,
-    friendsNotice: '',
-    error: '',
-    profileNotice: '',
-  });
+  setState({ view: 'profile', error: '', profileNotice: '' });
 }
 
 async function openAddFriendLink(profileId) {
@@ -238,9 +225,9 @@ function renderTopbar() {
         <button class="avatar-btn" data-action="toggle-profile-menu" title="Menu" aria-haspopup="true" aria-expanded="${S.profileMenuOpen ? 'true' : 'false'}">${avatar}</button>
         ${S.profileMenuOpen ? `
           <div class="profile-menu">
-            <a href="#/profil" data-action="close-profile-menu" data-tab="listes">🧾 Mes listes</a>
+            <a href="#/" data-action="close-profile-menu">🧾 Mes listes</a>
             <a href="#/amis" data-action="close-profile-menu">👥 Mes amis</a>
-            <a href="#/profil" data-action="close-profile-menu" data-tab="compte">👤 Mon profil</a>
+            <a href="#/profil" data-action="close-profile-menu">👤 Mon profil</a>
             <button data-action="logout">🚪 Se déconnecter</button>
           </div>
         ` : ''}
@@ -422,20 +409,15 @@ function renderOnboarding() {
   `;
 }
 
-const PROFILE_TABS = [
-  { key: 'listes', label: '🧾 Mes listes' },
-  { key: 'amis', label: '👥 Amis' },
-  { key: 'compte', label: '👤 Compte' },
-];
-
 function renderProfilePage() {
   const p = S.profile;
   const avatar = renderAvatar(p?.avatar_url, p?.display_name, 'large');
-  const activeTab = PROFILE_TABS.some((t) => t.key === S.profileTab) ? S.profileTab : 'compte';
 
-  let tabContent;
-  if (activeTab === 'compte') {
-    tabContent = `
+  return `
+    <div class="page">
+      <h1>Mon profil</h1>
+      ${S.profileNotice ? `<div class="banner notice">${escapeHtml(S.profileNotice)}</div>` : ''}
+
       <div class="card">
         <h2>Photo de profil</h2>
         <div class="avatar-row">
@@ -486,22 +468,6 @@ function renderProfilePage() {
           <button data-action="ask-delete-account" class="danger-btn">Supprimer mon compte</button>
         `}
       </div>
-    `;
-  } else if (activeTab === 'amis') {
-    tabContent = renderFriendsSections();
-  } else {
-    tabContent = `
-      ${renderMyListsSection()}
-      <a class="link-btn" href="#/">+ Créer une nouvelle liste →</a>
-    `;
-  }
-
-  return `
-    <div class="page">
-      <h1>Mon profil</h1>
-      ${S.profileNotice ? `<div class="banner notice">${escapeHtml(S.profileNotice)}</div>` : ''}
-
-      ${tabContent}
 
       <a class="link-btn" href="#/">&larr; Retour</a>
     </div>
@@ -1193,9 +1159,7 @@ app.addEventListener('click', async (e) => {
     // annule silencieusement la navigation par défaut.
     e.preventDefault();
     const href = btn.getAttribute('href');
-    const patch = { profileMenuOpen: false };
-    if (btn.dataset.tab) patch.profileTab = btn.dataset.tab;
-    setState(patch);
+    setState({ profileMenuOpen: false });
     if (href) location.hash = href;
     return;
   }
