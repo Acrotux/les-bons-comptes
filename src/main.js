@@ -229,19 +229,29 @@ async function refreshList(listId) {
 // ---------------- Render ----------------
 
 function render() {
-  if (S.view === 'loading') app.innerHTML = `<div class="center-screen">Chargement…</div>`;
-  else if (S.view === 'auth') app.innerHTML = renderAuth();
-  else if (S.view === 'confirm-email') app.innerHTML = renderConfirmEmail();
-  else if (S.view === 'reset-sent') app.innerHTML = renderResetSent();
-  else if (S.view === 'account-deleted') app.innerHTML = renderAccountDeleted();
-  else if (S.view === 'legal-mentions') app.innerHTML = renderLegalMentions();
-  else if (S.view === 'legal-privacy') app.innerHTML = renderLegalPrivacy();
-  else if (S.view === 'onboarding-name') app.innerHTML = renderOnboarding();
-  else if (S.view === 'profile') app.innerHTML = renderTopbar() + renderProfilePage();
-  else if (S.view === 'friends') app.innerHTML = renderTopbar() + renderFriendsPage();
-  else if (S.view === 'add-friend-link') app.innerHTML = renderTopbar() + renderAddFriendLink();
-  else if (S.view === 'home') app.innerHTML = renderTopbar() + renderHome();
-  else if (S.view === 'list') app.innerHTML = renderTopbar() + renderList();
+  if (S.view === 'loading') {
+    app.innerHTML = `<div class="center-screen">Chargement…</div>`;
+    return;
+  }
+  let html;
+  if (S.view === 'auth') html = renderAuth();
+  else if (S.view === 'confirm-email') html = renderConfirmEmail();
+  else if (S.view === 'reset-sent') html = renderResetSent();
+  else if (S.view === 'account-deleted') html = renderAccountDeleted();
+  else if (S.view === 'legal-mentions') html = renderLegalMentions();
+  else if (S.view === 'legal-privacy') html = renderLegalPrivacy();
+  else if (S.view === 'onboarding-name') html = renderOnboarding();
+  else if (S.view === 'profile') html = renderTopbar() + renderProfilePage();
+  else if (S.view === 'friends') html = renderTopbar() + renderFriendsPage();
+  else if (S.view === 'add-friend-link') html = renderTopbar() + renderAddFriendLink();
+  else if (S.view === 'home') html = renderTopbar() + renderHome();
+  else if (S.view === 'list') html = renderTopbar() + renderList();
+  app.innerHTML = html + renderFooter();
+}
+
+function renderFooter() {
+  const date = new Date(__BUILD_DATE__).toLocaleDateString('fr-FR');
+  return `<div class="app-footer muted">Version ${__APP_VERSION__} · Dernière mise à jour le ${date}</div>`;
 }
 
 function renderTopbar() {

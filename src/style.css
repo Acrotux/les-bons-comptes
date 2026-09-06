@@ -362,6 +362,13 @@ button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow
 .legal-page h2 { margin-top: 1.5rem; font-size: 1.1rem; }
 
 h1, h2, h3 { font-family: var(--font-sans); }
+
+.app-footer {
+  text-align: center;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  padding: 1.5rem 1rem 2rem;
+}
 h1 { font-size: 1.6rem; }
 
 @media (max-width: 480px) {
