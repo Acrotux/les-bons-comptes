@@ -19,7 +19,6 @@ const S = {
   confirmDeleteAccount: false,
   lists: [],
   pendingListInvites: [],
-  homeTab: 'toutes',
   profileTab: 'compte',
   profileMenuOpen: false,
   list: null,
@@ -502,10 +501,6 @@ function renderProfilePage() {
       <h1>Mon profil</h1>
       ${S.profileNotice ? `<div class="banner notice">${escapeHtml(S.profileNotice)}</div>` : ''}
 
-      <div class="tabs">
-        ${PROFILE_TABS.map((t) => `<button class="tab ${t.key === activeTab ? 'active' : ''}" data-action="switch-profile-tab" data-tab="${t.key}">${escapeHtml(t.label)}</button>`).join('')}
-      </div>
-
       ${tabContent}
 
       <a class="link-btn" href="#/">&larr; Retour</a>
@@ -659,28 +654,6 @@ function renderMyListsSection() {
 }
 
 function renderHome() {
-  const usedCategories = [...new Set(S.lists.map((l) => l.category).filter(Boolean))].sort();
-  const hasUncategorized = S.lists.some((l) => !l.category);
-  const tabs = [
-    { key: 'toutes', label: 'Toutes' },
-    ...usedCategories.map((c) => ({ key: c, label: c })),
-    ...(hasUncategorized ? [{ key: '__none__', label: 'Sans catégorie' }] : []),
-  ];
-  const activeTab = tabs.some((t) => t.key === S.homeTab) ? S.homeTab : 'toutes';
-
-  const filtered = activeTab === 'toutes'
-    ? S.lists
-    : activeTab === '__none__'
-      ? S.lists.filter((l) => !l.category)
-      : S.lists.filter((l) => l.category === activeTab);
-  const open = filtered.filter((l) => l.status === 'open');
-  const closed = filtered.filter((l) => l.status === 'closed');
-  const tabContent = `
-    <h2>Listes en cours</h2>
-    <div class="list-grid">${open.length ? open.map(renderListCard).join('') : '<p class="muted">Aucune liste en cours.</p>'}</div>
-    ${closed.length ? `<h2>Historique</h2><div class="list-grid">${closed.map(renderListCard).join('')}</div>` : ''}
-  `;
-
   return `
     <div class="page">
       ${S.pendingListInvites.length ? `
@@ -713,11 +686,7 @@ function renderHome() {
         </form>
       </div>
 
-      <div class="tabs">
-        ${tabs.map((t) => `<button class="tab ${t.key === activeTab ? 'active' : ''}" data-action="switch-home-tab" data-tab="${t.key}">${escapeHtml(t.label)}</button>`).join('')}
-      </div>
-
-      ${tabContent}
+      ${renderMyListsSection()}
     </div>
   `;
 }
@@ -1312,10 +1281,6 @@ app.addEventListener('click', async (e) => {
     } else if (action === 'decline-list-invite') {
       await api.declineListInvite(btn.dataset.id);
       await loadHome();
-    } else if (action === 'switch-home-tab') {
-      setState({ homeTab: btn.dataset.tab });
-    } else if (action === 'switch-profile-tab') {
-      setState({ profileTab: btn.dataset.tab });
     } else if (action === 'switch-list-tab') {
       setState({ listTab: btn.dataset.tab });
     } else if (action === 'ask-delete-account') {
