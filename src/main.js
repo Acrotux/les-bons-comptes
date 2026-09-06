@@ -11,6 +11,7 @@ const LIST_TABS = [
   { key: 'apercu', label: '📊 Aperçu' },
   { key: 'participants', label: 'Participants' },
   { key: 'depenses', label: 'Dépenses' },
+  { key: 'justificatifs', label: '📎 Justificatifs' },
   { key: 'soldes', label: 'Soldes' },
   { key: 'remboursements', label: 'Remboursements suggérés' },
 ];
@@ -742,8 +743,11 @@ function renderList() {
         </ul>
         ${isMember ? renderExpenseForm() : ''}
       </div>
-      ${isMember ? renderPendingReceiptsCard(uid, isAdmin) : ''}
     `;
+  } else if (activeTab === 'justificatifs') {
+    tabContent = isMember
+      ? renderPendingReceiptsCard(uid, isAdmin)
+      : '<p class="muted">Rejoins la liste pour envoyer ou attribuer des justificatifs.</p>';
   } else if (activeTab === 'soldes') {
     tabContent = `
       <div class="card">
