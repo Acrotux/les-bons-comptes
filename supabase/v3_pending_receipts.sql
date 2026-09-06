@@ -8,6 +8,7 @@ create table if not exists pending_receipts (
   id uuid primary key default gen_random_uuid(),
   list_id uuid not null references lists(id) on delete cascade,
   storage_path text not null,
+  label text,
   uploaded_by uuid not null references auth.users(id),
   created_at timestamptz not null default now()
 );

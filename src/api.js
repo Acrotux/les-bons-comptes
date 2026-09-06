@@ -410,13 +410,15 @@ export async function getPendingReceipts(listId) {
   return data;
 }
 
-export async function uploadPendingReceipt(listId, file) {
+export async function uploadPendingReceipt(listId, file, label) {
   const ext = file.name.split('.').pop();
   const path = `${listId}/pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const { error: uploadError } = await supabase.storage.from('receipts').upload(path, file, { contentType: file.type });
   if (uploadError) throw uploadError;
   const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase.from('pending_receipts').insert({ list_id: listId, storage_path: path, uploaded_by: user.id });
+  const { error } = await supabase
+    .from('pending_receipts')
+    .insert({ list_id: listId, storage_path: path, uploaded_by: user.id, label: label || null });
   if (error) throw error;
 }
 

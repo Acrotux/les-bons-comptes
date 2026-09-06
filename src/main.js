@@ -887,7 +887,15 @@ function renderMember(m, isCreator, isAdmin) {
       </li>
     `;
   }
-  const canPromote = isCreator && m.profile_id && m.profile_id !== S.list.created_by && m.status === 'active';
+  const isOwnRow = m.profile_id && m.profile_id === S.list.created_by;
+  const canPromote = isCreator && m.profile_id && !isOwnRow && m.status === 'active';
+  const promotionHint = isCreator && !isOwnRow && !canPromote
+    ? (!m.profile_id
+        ? 'doit créer un compte pour devenir co-admin'
+        : m.status === 'invited'
+          ? 'doit accepter l\'invitation pour devenir co-admin'
+          : '')
+    : '';
   return `
     <li>
       ${renderMemberAvatar(m)}
@@ -896,7 +904,8 @@ function renderMember(m, isCreator, isAdmin) {
       ${!m.profile_id ? '<span class="badge muted">en attente</span>' : ''}
       ${m.profile_id && m.status === 'invited' ? '<span class="badge muted">invité·e, pas encore accepté</span>' : ''}
       ${m.email ? `<a class="mail-link" href="mailto:${escapeHtml(m.email)}">✉</a>` : '<span class="badge muted">pas d\'e-mail</span>'}
-      ${canPromote ? `<button class="icon-btn" data-action="toggle-co-admin" data-id="${m.id}" data-value="${!m.is_co_admin}" title="${m.is_co_admin ? 'Retirer les droits de co-administrateur' : 'Nommer co-administrateur'}">${m.is_co_admin ? '🥈' : '🥈+'}</button>` : ''}
+      ${canPromote ? `<button class="icon-btn" data-action="toggle-co-admin" data-id="${m.id}" data-value="${!m.is_co_admin}">${m.is_co_admin ? 'Retirer co-admin' : 'Nommer co-admin'}</button>` : ''}
+      ${promotionHint ? `<span class="muted hint">(${promotionHint})</span>` : ''}
       ${isAdmin ? `<button class="icon-btn" data-action="edit-member" data-id="${m.id}" title="Modifier ce participant">✎</button>` : ''}
       ${isAdmin ? `<button class="icon-btn" data-action="remove-member" data-id="${m.id}" title="Retirer ce participant">🗑</button>` : ''}
     </li>
@@ -983,7 +992,7 @@ function renderExpense(e, uid, isAdmin, payers) {
       <span class="expense-label">${escapeHtml(e.label)}</span>
       <span class="expense-amount">${formatCents(e.amount_cents)}</span>
       <span class="expense-payer">payé par ${payerHtml}</span>
-      ${e.receipt_url ? `<button class="icon-btn" data-action="view-receipt" data-path="${escapeHtml(e.receipt_url)}" title="Voir le justificatif">📎</button>` : ''}
+      ${e.receipt_url ? `<button class="icon-btn" data-action="view-receipt" data-path="${escapeHtml(e.receipt_url)}" title="Aperçu">📎 Aperçu</button>` : ''}
       ${canManage ? `<button class="icon-btn" data-action="edit-expense" data-id="${e.id}" title="Modifier cette dépense">✎</button>` : ''}
       ${canManage ? `<button class="icon-btn" data-action="remove-expense" data-id="${e.id}" title="Supprimer cette dépense">🗑</button>` : ''}
     </li>
@@ -996,6 +1005,7 @@ function renderPendingReceiptsCard(uid, isAdmin) {
       <h2>Justificatifs en attente</h2>
       <p class="muted">Envoie un ou plusieurs tickets/factures maintenant, tu pourras les attribuer à une dépense (libellé, payeur, montant) plus tard, un par un.</p>
       <form data-action="upload-pending-receipts">
+        <input type="text" name="label" placeholder="Libellé (optionnel, ex : Courses du 6 septembre)" />
         <input type="file" name="receipts" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" multiple required />
         <button type="submit">Envoyer</button>
       </form>
@@ -1014,7 +1024,7 @@ function renderPendingReceipt(r, uid, isAdmin) {
     return `
       <li>
         <form data-action="attribute-receipt" data-id="${r.id}" class="expense-form">
-          <input type="text" name="label" required placeholder="Libellé (ex : Courses)" />
+          <input type="text" name="label" required placeholder="Libellé (ex : Courses)" value="${escapeHtml(r.label || '')}" />
           <div class="payer-rows">${payerRowHtml()}</div>
           <button type="button" class="link-btn" data-action="add-payer-row">+ Payé par plusieurs personnes (montants différents)</button>
           <div class="inline-edit-actions">
@@ -1028,7 +1038,8 @@ function renderPendingReceipt(r, uid, isAdmin) {
   const date = new Date(r.created_at).toLocaleDateString('fr-FR');
   return `
     <li>
-      <button class="icon-btn" data-action="view-receipt" data-path="${escapeHtml(r.storage_path)}" title="Voir le justificatif">📎 Justificatif</button>
+      <button class="icon-btn" data-action="view-receipt" data-path="${escapeHtml(r.storage_path)}" title="Aperçu">📎 Aperçu</button>
+      <span>${r.label ? escapeHtml(r.label) : '<span class="muted">(sans libellé)</span>'}</span>
       <span class="muted">ajouté le ${date}</span>
       <button data-action="start-attribute-receipt" data-id="${r.id}">Attribuer</button>
       ${canManage ? `<button class="icon-btn" data-action="discard-pending-receipt" data-id="${r.id}" data-path="${escapeHtml(r.storage_path)}" title="Supprimer sans attribuer">🗑</button>` : ''}
@@ -1136,7 +1147,7 @@ app.addEventListener('submit', async (e) => {
       setState({ inlineEdit: null });
     } else if (action === 'upload-pending-receipts') {
       const files = [...form.receipts.files];
-      await Promise.all(files.map((file) => api.uploadPendingReceipt(S.list.id, file)));
+      await Promise.all(files.map((file) => api.uploadPendingReceipt(S.list.id, file, data.label)));
       form.reset();
     } else if (action === 'attribute-receipt') {
       const receiptId = form.dataset.id;
