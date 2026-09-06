@@ -1,10 +1,12 @@
 // Calcul des soldes et des remboursements suggérés.
 // Toutes les sommes sont en centimes (entiers) pour éviter les erreurs d'arrondi.
+// Une dépense peut être payée par plusieurs participants à des montants différents :
+// `expensePayers` est la liste à plat de toutes ces parts, tous montants confondus.
 
-export function computeBalances(members, expenses, settlements) {
+export function computeBalances(members, expensePayers, settlements) {
   const memberIds = members.map((m) => m.id);
   const n = memberIds.length;
-  const total = expenses.reduce((sum, e) => sum + e.amount_cents, 0);
+  const total = expensePayers.reduce((sum, p) => sum + p.amount_cents, 0);
 
   // Répartition équitable par méthode du plus grand reste.
   const shares = {};
@@ -18,8 +20,8 @@ export function computeBalances(members, expenses, settlements) {
 
   const paid = {};
   memberIds.forEach((id) => (paid[id] = 0));
-  for (const e of expenses) {
-    paid[e.member_id] = (paid[e.member_id] || 0) + e.amount_cents;
+  for (const p of expensePayers) {
+    paid[p.member_id] = (paid[p.member_id] || 0) + p.amount_cents;
   }
 
   const balances = {};

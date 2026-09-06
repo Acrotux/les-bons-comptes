@@ -10,11 +10,12 @@ const CATEGORIES = ['Anniversaire', 'Famille', 'Professionnel', 'Voyage', 'Autre
 const S = {
   session: null,
   profile: null,
-  view: 'loading', // loading | auth | confirm-email | reset-sent | onboarding-name | home | list | profile | friends
+  view: 'loading', // loading | auth | confirm-email | reset-sent | onboarding-name | home | list | profile | friends | add-friend-link
   authMode: 'login', // login | signup | forgot
   pendingEmail: '',
   error: '',
   profileNotice: '',
+  friendsNotice: '',
   confirmDeleteAccount: false,
   lists: [],
   pendingListInvites: [],
@@ -25,12 +26,14 @@ const S = {
   memberProfiles: {}, // profile_id -> { display_name, avatar_url }
   memberSearchResults: [],
   expenses: [],
+  expensePayers: [], // { id, expense_id, member_id, amount_cents }[]
   settlements: [],
   friends: [],
   pendingInvites: [],
   friendSearchResults: [],
   friendSearchQuery: '',
   friendSearchNoMatch: false,
+  friendLinkProfile: null,
   unsubscribe: null,
   inlineEdit: null, // { type: 'member', id } | { type: 'confirm-remove-member', id }
 };
@@ -51,6 +54,10 @@ function renderAvatar(url, name, size) {
   return url
     ? `<img class="${cls}" src="${escapeHtml(url)}" alt="" />`
     : `<span class="${cls} avatar-placeholder">${escapeHtml(initial)}</span>`;
+}
+
+function inviteLinkFor(profileId) {
+  return `${window.location.origin}${import.meta.env.BASE_URL}#/ajouter/${profileId}`;
 }
 
 // ---------------- Boot ----------------
@@ -94,14 +101,18 @@ async function routeFromHash() {
     setState({ view: LEGAL_VIEWS[location.hash] });
     return;
   }
-  const m = location.hash.match(/^#\/list\/([a-f0-9-]+)/i);
+  const mList = location.hash.match(/^#\/list\/([a-f0-9-]+)/i);
+  const mAddFriend = location.hash.match(/^#\/ajouter\/([a-f0-9-]+)/i);
   if (location.hash === '#/profil') {
     if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
-    setState({ view: 'profile', error: '', profileNotice: '' });
+    const lists = await api.fetchMyLists();
+    setState({ view: 'profile', lists, error: '', profileNotice: '' });
   } else if (location.hash === '#/amis') {
     await loadFriends();
-  } else if (m) {
-    await openList(m[1]);
+  } else if (mAddFriend) {
+    await openAddFriendLink(mAddFriend[1]);
+  } else if (mList) {
+    await openList(mList[1]);
   } else {
     await loadHome();
   }
@@ -117,8 +128,19 @@ async function loadFriends() {
     friendSearchResults: [],
     friendSearchQuery: '',
     friendSearchNoMatch: false,
+    friendsNotice: '',
     error: '',
   });
+}
+
+async function openAddFriendLink(profileId) {
+  if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
+  try {
+    const [card, friends] = await Promise.all([api.getPublicProfileCard(profileId), api.listFriends()]);
+    setState({ view: 'add-friend-link', friendLinkProfile: card, friends, error: '' });
+  } catch (e) {
+    setState({ view: 'add-friend-link', friendLinkProfile: null, error: '' });
+  }
 }
 
 async function loadHome() {
@@ -131,15 +153,16 @@ async function openList(listId) {
   if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
   try {
     const list = await api.getList(listId);
-    const [members, expenses, settlements, memberProfilesArr] = await Promise.all([
+    const [members, expenses, expensePayers, settlements, memberProfilesArr] = await Promise.all([
       api.getMembers(listId),
       api.getExpenses(listId),
+      api.getExpensePayers(listId),
       api.getSettlements(listId),
       api.getMemberProfiles(listId),
     ]);
     const memberProfiles = Object.fromEntries(memberProfilesArr.map((p) => [p.profile_id, p]));
     S.unsubscribe = api.subscribeToList(listId, () => refreshList(listId));
-    setState({ view: 'list', list, members, expenses, settlements, memberProfiles, memberSearchResults: [], listTab: 'apercu' });
+    setState({ view: 'list', list, members, expenses, expensePayers, settlements, memberProfiles, memberSearchResults: [], listTab: 'apercu' });
     location.hash = `#/list/${listId}`;
   } catch (e) {
     setState({ view: 'home', error: "Liste introuvable ou accès non autorisé." });
@@ -147,15 +170,16 @@ async function openList(listId) {
 }
 
 async function refreshList(listId) {
-  const [list, members, expenses, settlements, memberProfilesArr] = await Promise.all([
+  const [list, members, expenses, expensePayers, settlements, memberProfilesArr] = await Promise.all([
     api.getList(listId),
     api.getMembers(listId),
     api.getExpenses(listId),
+    api.getExpensePayers(listId),
     api.getSettlements(listId),
     api.getMemberProfiles(listId),
   ]);
   const memberProfiles = Object.fromEntries(memberProfilesArr.map((p) => [p.profile_id, p]));
-  setState({ list, members, expenses, settlements, memberProfiles });
+  setState({ list, members, expenses, expensePayers, settlements, memberProfiles });
 }
 
 // ---------------- Render ----------------
@@ -171,6 +195,7 @@ function render() {
   else if (S.view === 'onboarding-name') app.innerHTML = renderOnboarding();
   else if (S.view === 'profile') app.innerHTML = renderTopbar() + renderProfilePage();
   else if (S.view === 'friends') app.innerHTML = renderTopbar() + renderFriendsPage();
+  else if (S.view === 'add-friend-link') app.innerHTML = renderTopbar() + renderAddFriendLink();
   else if (S.view === 'home') app.innerHTML = renderTopbar() + renderHome();
   else if (S.view === 'list') app.innerHTML = renderTopbar() + renderList();
 }
@@ -321,16 +346,16 @@ function renderLegalPrivacy() {
       <h1>Politique de confidentialité</h1>
 
       <h2>Données collectées</h2>
-      <p>Pseudo, adresse email, mot de passe (stocké de façon chiffrée, jamais en clair), photo de profil optionnelle, ainsi que les données que tu saisis dans l'application : listes de dépenses, montants, participants, remboursements. Les participants sans compte que tu ajoutes à une liste peuvent avoir un nom et une adresse email associés.</p>
+      <p>Pseudo, adresse email, mot de passe (stocké de façon chiffrée, jamais en clair), photo de profil optionnelle, ainsi que les données que tu saisis dans l'application : listes de dépenses, montants, participants, remboursements, et les justificatifs (tickets de caisse, factures) que tu choisis de joindre à une dépense. Les participants sans compte que tu ajoutes à une liste peuvent avoir un nom et une adresse email associés.</p>
 
       <h2>Finalités</h2>
       <p>Ces données servent uniquement à faire fonctionner l'application : authentification, gestion des listes de dépenses partagées, calcul des soldes et des remboursements.</p>
 
       <h2>Qui voit quoi</h2>
-      <p>Ton pseudo et ta photo de profil sont visibles par les autres participants des listes auxquelles tu appartiens. Les dépenses et remboursements d'une liste sont visibles par tous ses participants. Ton adresse email n'est jamais affichée publiquement ni partagée avec les autres utilisateurs, sauf si tu choisis toi-même de la renseigner comme contact d'un participant.</p>
+      <p>Ton pseudo et ta photo de profil sont visibles par les autres participants des listes auxquelles tu appartiens. Les dépenses, remboursements et justificatifs d'une liste sont visibles uniquement par ses participants (les justificatifs sont stockés dans un espace privé, jamais public). Ton adresse email n'est jamais affichée publiquement ni partagée avec les autres utilisateurs, sauf si tu choisis toi-même de la renseigner comme contact d'un participant.</p>
 
       <h2>Sous-traitants</h2>
-      <p><strong>Supabase</strong> (base de données, authentification, stockage des photos) — hébergé dans l'Union Européenne.<br /><strong>GitHub Pages</strong> (hébergement des fichiers statiques du site, aucune donnée personnelle n'y est stockée).</p>
+      <p><strong>Supabase</strong> (base de données, authentification, stockage des photos et justificatifs) — hébergé dans l'Union Européenne.<br /><strong>GitHub Pages</strong> (hébergement des fichiers statiques du site, aucune donnée personnelle n'y est stockée).</p>
 
       <h2>Conservation</h2>
       <p>Tes données sont conservées tant que ton compte existe. Les dépenses/remboursements déjà enregistrés dans une liste partagée peuvent rester visibles aux autres participants après la suppression de ton compte, mais sans ton nom ni ta photo (anonymisés).</p>
@@ -365,6 +390,9 @@ function renderOnboarding() {
 function renderProfilePage() {
   const p = S.profile;
   const avatar = renderAvatar(p?.avatar_url, p?.display_name, 'large');
+  const open = S.lists.filter((l) => l.status === 'open');
+  const closed = S.lists.filter((l) => l.status === 'closed');
+  const link = inviteLinkFor(p.id);
   return `
     <div class="page">
       <h1>Mon profil</h1>
@@ -406,6 +434,28 @@ function renderProfilePage() {
         </form>
       </div>
 
+      <div class="card">
+        <h2>Mes amis</h2>
+        <p class="muted">Retrouve ici tes amis classés par catégorie, tes invitations en attente, et ton lien d'invitation.</p>
+        <a class="link-btn" href="#/amis">Gérer mes amis →</a>
+      </div>
+
+      <div class="card">
+        <h2>Mes listes de dépense</h2>
+        <p>${open.length ? `${open.length} liste${open.length > 1 ? 's' : ''} en cours` : 'Aucune liste en cours.'}</p>
+        ${closed.length ? `<p class="muted">${closed.length} clôturée${closed.length > 1 ? 's' : ''} dans l'historique</p>` : ''}
+        <a class="link-btn" href="#/">Voir toutes mes listes →</a>
+      </div>
+
+      <div class="card">
+        <h2>Ton lien d'invitation</h2>
+        <p class="muted">Partage ce lien : quiconque l'ouvre après s'être connecté peut t'ajouter directement en ami.</p>
+        <div class="invite-link-row">
+          <input type="text" readonly value="${escapeHtml(link)}" id="profile-invite-link" />
+          <button type="button" data-action="copy-invite-link" data-target="profile-invite-link">Copier</button>
+        </div>
+      </div>
+
       <div class="card danger-zone">
         <h2>Zone dangereuse</h2>
         ${S.confirmDeleteAccount ? `
@@ -433,10 +483,12 @@ function renderFriendsPage() {
   }
   const categories = Object.keys(grouped).sort();
   const ownCategories = [...new Set(S.friends.map((f) => f.category))].sort();
+  const link = inviteLinkFor(S.profile.id);
 
   return `
     <div class="page">
       <h1>Mes amis</h1>
+      ${S.friendsNotice ? `<div class="banner notice">${escapeHtml(S.friendsNotice)}</div>` : ''}
 
       <datalist id="friend-category-options">
         ${ownCategories.map((c) => `<option value="${escapeHtml(c)}"></option>`).join('')}
@@ -444,9 +496,12 @@ function renderFriendsPage() {
 
       <div class="card">
         <h2>Ajouter un ami</h2>
-        <input type="text" data-action="friend-search-input" placeholder="Rechercher un pseudo ou un email…" />
-        <label class="muted">Catégorie pour ce nouvel ami (optionnel, tu peux créer la tienne)</label>
-        <input type="text" id="new-friend-category" list="friend-category-options" placeholder="Ex : Famille, Collègues, Rugby…" />
+        <p class="muted">Cherche un pseudo ou un email déjà inscrit, ou partage ton lien d'invitation ci-dessous.</p>
+        <div class="field-stack">
+          <input type="text" data-action="friend-search-input" placeholder="Rechercher un pseudo ou un email…" />
+          <label class="muted">Catégorie pour ce nouvel ami (optionnel, tu peux créer la tienne)</label>
+          <input type="text" id="new-friend-category" list="friend-category-options" placeholder="Ex : Famille, Collègues, Rugby…" />
+        </div>
         ${S.friendSearchResults.length ? `
           <ul class="search-results">
             ${S.friendSearchResults.map((p) => `
@@ -464,6 +519,15 @@ function renderFriendsPage() {
         ` : ''}
       </div>
 
+      <div class="card">
+        <h2>Ton lien d'invitation</h2>
+        <p class="muted">Partage ce lien : la personne qui l'ouvre (après s'être connectée) peut t'ajouter en ami directement, sans connaître ton email.</p>
+        <div class="invite-link-row">
+          <input type="text" readonly value="${escapeHtml(link)}" id="friends-invite-link" />
+          <button type="button" data-action="copy-invite-link" data-target="friends-invite-link">Copier</button>
+        </div>
+      </div>
+
       ${S.pendingInvites.length ? `
         <h2>Invitations en attente</h2>
         <ul class="member-list">
@@ -471,7 +535,7 @@ function renderFriendsPage() {
             <li>
               <span>${escapeHtml(inv.email)}</span>
               <span class="badge muted">en attente</span>
-              <button class="icon-btn" data-action="cancel-friend-invite" data-id="${inv.id}">🗑</button>
+              <button class="icon-btn" data-action="cancel-friend-invite" data-id="${inv.id}" title="Annuler l'invitation">🗑</button>
             </li>
           `).join('')}
         </ul>
@@ -485,11 +549,41 @@ function renderFriendsPage() {
               ${renderAvatar(f.avatar_url, f.display_name, 'mini')}
               <span>${escapeHtml(f.display_name)}</span>
               <input type="text" list="friend-category-options" data-action="update-friend-category" data-id="${f.id}" value="${escapeHtml(f.category)}" />
-              <button class="icon-btn" data-action="remove-friend" data-id="${f.id}">🗑</button>
+              <button class="icon-btn" data-action="remove-friend" data-id="${f.id}" title="Retirer cet ami">🗑</button>
             </li>
           `).join('')}
         </ul>
       `).join('') : '<p class="muted">Aucun ami ajouté pour l\'instant.</p>'}
+    </div>
+  `;
+}
+
+function renderAddFriendLink() {
+  const p = S.friendLinkProfile;
+  if (!p) {
+    return `
+      <div class="page">
+        <div class="card"><p class="muted">Ce lien d'invitation n'est plus valide.</p><a class="link-btn" href="#/">Retour à l'accueil</a></div>
+      </div>
+    `;
+  }
+  const isMe = p.id === S.session.user.id;
+  const alreadyFriend = S.friends.some((f) => f.friend_id === p.id);
+  return `
+    <div class="page">
+      <div class="card" style="text-align:center;">
+        ${renderAvatar(p.avatar_url, p.display_name, 'large')}
+        <h2>${escapeHtml(p.display_name)}</h2>
+        ${isMe ? `
+          <p class="muted">C'est ton propre lien d'invitation — partage-le à un ami pour qu'il t'ajoute !</p>
+        ` : alreadyFriend ? `
+          <p class="muted">${escapeHtml(p.display_name)} est déjà dans tes amis.</p>
+        ` : `
+          <p class="muted">t'invite à rejoindre sa liste d'amis sur Les Bons Comptes.</p>
+          <button data-action="add-friend-from-link" data-id="${p.id}" data-name="${escapeHtml(p.display_name)}">Ajouter ${escapeHtml(p.display_name)} en ami</button>
+        `}
+        <a class="link-btn" href="#/">Retour à l'accueil</a>
+      </div>
     </div>
   `;
 }
@@ -548,13 +642,14 @@ function renderHome() {
 
       <div class="card">
         <h2>Nouvelle liste</h2>
+        <p class="muted">Une liste privée n'est visible que par les personnes que tu y invites. Une liste publique peut être rejointe par toute personne connectée qui a le lien.</p>
         <form data-action="create-list" class="create-list-form">
           <input type="text" name="name" required placeholder="Ex : Week-end à Lyon" />
           <select name="category">
             <option value="">Sans catégorie</option>
             ${CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join('')}
           </select>
-          <label class="checkbox"><input type="checkbox" name="isPrivate" /> Privée (accessible seulement par lien/invitation)</label>
+          <label class="checkbox"><input type="checkbox" name="isPrivate" checked /> Privée (accessible seulement par invitation)</label>
           <button type="submit">Créer</button>
         </form>
       </div>
@@ -575,10 +670,16 @@ function renderList() {
   const myPendingInvite = S.members.find((m) => m.profile_id === uid && m.status === 'invited');
   const myMember = S.members.find((m) => m.profile_id === uid && m.status === 'active');
   const isMember = !!myMember;
+  const isAdmin = isCreator || (myMember && myMember.is_co_admin);
 
-  const { total, balances, memberIds } = computeBalances(S.members, S.expenses, S.settlements);
-  const { balances: grossBalances } = computeBalances(S.members, S.expenses, []);
+  const { total, balances, memberIds } = computeBalances(S.members, S.expensePayers, S.settlements);
+  const { balances: grossBalances } = computeBalances(S.members, S.expensePayers, []);
   const transactions = computeTransactions(balances, memberIds);
+
+  const payersByExpense = {};
+  for (const p of S.expensePayers) {
+    (payersByExpense[p.expense_id] ||= []).push(p);
+  }
 
   const listTabs = [
     { key: 'apercu', label: '📊 Aperçu' },
@@ -596,8 +697,9 @@ function renderList() {
     tabContent = `
       <div class="card">
         <h2>Participants</h2>
+        <p class="muted">👑 le créateur de la liste, 🥈 un co-administrateur qu'il a nommé (mêmes droits de gestion, sauf clôturer la liste).</p>
         <ul class="member-list">
-          ${S.members.map((m) => renderMember(m, isCreator)).join('')}
+          ${S.members.map((m) => renderMember(m, isCreator, isAdmin)).join('')}
         </ul>
         <form data-action="add-member" class="add-member-form">
           <input type="text" name="name" required placeholder="Nom ou pseudo du participant" data-action="member-search-input" />
@@ -623,24 +725,16 @@ function renderList() {
       <div class="card">
         <h2>Dépenses <span class="muted">(total ${formatCents(total)})</span></h2>
         <ul class="expense-list">
-          ${S.expenses.map((e) => renderExpense(e, uid, isCreator)).join('') || '<p class="muted">Aucune dépense pour l\'instant.</p>'}
+          ${S.expenses.map((e) => renderExpense(e, uid, isAdmin, payersByExpense[e.id] || [])).join('') || '<p class="muted">Aucune dépense pour l\'instant.</p>'}
         </ul>
-        ${isMember ? `
-          <form data-action="add-expense" class="expense-form">
-            <select name="memberId" class="payer-select">
-              ${S.members.map((m) => `<option value="${m.id}">${escapeHtml(m.display_name)}</option>`).join('')}
-            </select>
-            <input type="text" name="label" required placeholder="Libellé (ex : Courses)" />
-            <input type="number" name="amount" required min="0.01" step="0.01" placeholder="Montant €" />
-            <button type="submit">Ajouter</button>
-          </form>
-        ` : ''}
+        ${isMember ? renderExpenseForm() : ''}
       </div>
     `;
   } else if (activeTab === 'soldes') {
     tabContent = `
       <div class="card">
         <h2>Soldes</h2>
+        <p class="muted">Ce que chacun a payé, comparé à sa part équitable du total.</p>
         <ul class="balance-list">
           ${memberIds.map((id) => renderBalance(id, balances[id])).join('')}
         </ul>
@@ -650,10 +744,12 @@ function renderList() {
     tabContent = `
       <div class="card">
         <h2>Remboursements suggérés</h2>
+        <p class="muted">Le plus petit nombre de virements pour que tout le monde soit à jour.</p>
         ${transactions.length ? `<ul class="tx-list">${transactions.map((t) => renderTransaction(t, myMember)).join('')}</ul>` : '<p class="muted">Tout le monde est à jour 🎉</p>'}
         ${renderPendingSettlements(myMember)}
         ${isMember ? `
           <h3>Déclarer un remboursement (montant libre, aussi partiel)</h3>
+          <p class="muted">Seule la personne qui reçoit peut ensuite confirmer qu'elle a bien été remboursée, en tout ou en partie.</p>
           <form data-action="declare-custom-settlement" class="custom-settlement-form">
             <select name="toMemberId">
               ${S.members.filter((m) => m.id !== myMember.id).map((m) => `<option value="${m.id}">${escapeHtml(m.display_name)}</option>`).join('')}
@@ -673,14 +769,14 @@ function renderList() {
         <div class="list-header-actions">
           <span class="badge ${list.status}">${list.status === 'open' ? 'ouverte' : 'clôturée'}</span>
           <span class="badge muted">${list.is_private ? 'privée' : 'publique'}</span>
-          ${isCreator ? `
+          ${isAdmin ? `
             <select data-action="update-list-category">
               <option value="">Sans catégorie</option>
               ${CATEGORIES.map((c) => `<option value="${c}" ${c === list.category ? 'selected' : ''}>${c}</option>`).join('')}
             </select>
           ` : list.category ? `<span class="badge muted">${escapeHtml(list.category)}</span>` : ''}
           <button data-action="copy-link">Copier le lien</button>
-          ${isCreator ? `<button data-action="toggle-privacy" data-private="${list.is_private}">${list.is_private ? 'Rendre publique' : 'Rendre privée'}</button>` : ''}
+          ${isAdmin ? `<button data-action="toggle-privacy" data-private="${list.is_private}">${list.is_private ? 'Rendre publique' : 'Rendre privée'}</button>` : ''}
           ${isCreator ? `<button data-action="toggle-status" data-status="${list.status}">${list.status === 'open' ? 'Clôturer' : 'Rouvrir'}</button>` : ''}
         </div>
       </div>
@@ -725,16 +821,16 @@ function renderListOverview(memberIds, balances, grossBalances) {
   }
   const remaining = Math.max(0, totalToReimburse - alreadyReimbursed);
 
-  const tile = (value, label) => `<div class="card stat-tile"><div class="stat-value">${value}</div><div class="stat-label">${label}</div></div>`;
+  const tile = (icon, value, label) => `<div class="card stat-tile"><div class="stat-icon">${icon}</div><div class="stat-value">${value}</div><div class="stat-label">${label}</div></div>`;
 
   return `
     <div class="stat-grid">
-      ${tile(formatCents(totalToReimburse), 'Montant total à rembourser')}
-      ${tile(formatCents(remaining), 'Montant restant à rembourser')}
-      ${tile(formatCents(alreadyReimbursed), 'Montant déjà remboursé')}
-      ${tile(memberIds.length, 'Participants dans la liste')}
-      ${tile(debtorsCount, "N'ont pas encore remboursé leurs dettes")}
-      ${tile(settledDebtorsCount, 'Ont remboursé leurs dettes')}
+      ${tile('💶', formatCents(totalToReimburse), 'Montant total à rembourser')}
+      ${tile('⏳', formatCents(remaining), 'Montant restant à rembourser')}
+      ${tile('✅', formatCents(alreadyReimbursed), 'Montant déjà remboursé')}
+      ${tile('👥', memberIds.length, 'Participants dans la liste')}
+      ${tile('🔴', debtorsCount, "N'ont pas encore remboursé leurs dettes")}
+      ${tile('🟢', settledDebtorsCount, 'Ont remboursé leurs dettes')}
     </div>
   `;
 }
@@ -762,10 +858,15 @@ function renderMemberAvatar(m) {
   const profile = m.profile_id ? S.memberProfiles[m.profile_id] : null;
   const isCreator = m.profile_id && m.profile_id === S.list?.created_by;
   const img = renderAvatar(profile?.avatar_url, m.display_name, 'mini');
-  return `<span class="avatar-wrap">${img}${isCreator ? '<span class="crown" title="Créateur de la liste">👑</span>' : ''}</span>`;
+  const crown = isCreator
+    ? '<span class="crown crown-gold" title="Créateur de la liste">👑</span>'
+    : m.is_co_admin
+      ? '<span class="crown crown-silver" title="Co-administrateur">👑</span>'
+      : '';
+  return `<span class="avatar-wrap">${img}${crown}</span>`;
 }
 
-function renderMember(m, isCreator) {
+function renderMember(m, isCreator, isAdmin) {
   if (S.inlineEdit && S.inlineEdit.type === 'member' && S.inlineEdit.id === m.id) {
     return `
       <li>
@@ -787,33 +888,67 @@ function renderMember(m, isCreator) {
       </li>
     `;
   }
+  const canPromote = isCreator && m.profile_id && m.profile_id !== S.list.created_by && m.status === 'active';
   return `
     <li>
       ${renderMemberAvatar(m)}
       <span>${escapeHtml(m.display_name)}</span>
+      ${m.is_co_admin ? '<span class="badge muted">co-admin</span>' : ''}
       ${!m.profile_id ? '<span class="badge muted">en attente</span>' : ''}
       ${m.profile_id && m.status === 'invited' ? '<span class="badge muted">invité·e, pas encore accepté</span>' : ''}
       ${m.email ? `<a class="mail-link" href="mailto:${escapeHtml(m.email)}">✉</a>` : '<span class="badge muted">pas d\'e-mail</span>'}
-      ${isCreator ? `<button class="icon-btn" data-action="edit-member" data-id="${m.id}">✎</button>` : ''}
-      ${isCreator ? `<button class="icon-btn" data-action="remove-member" data-id="${m.id}">🗑</button>` : ''}
+      ${canPromote ? `<button class="icon-btn" data-action="toggle-co-admin" data-id="${m.id}" data-value="${!m.is_co_admin}" title="${m.is_co_admin ? 'Retirer les droits de co-administrateur' : 'Nommer co-administrateur'}">${m.is_co_admin ? '🥈' : '🥈+'}</button>` : ''}
+      ${isAdmin ? `<button class="icon-btn" data-action="edit-member" data-id="${m.id}" title="Modifier ce participant">✎</button>` : ''}
+      ${isAdmin ? `<button class="icon-btn" data-action="remove-member" data-id="${m.id}" title="Retirer ce participant">🗑</button>` : ''}
     </li>
   `;
 }
 
-function renderExpense(e, uid, isCreator) {
-  const canDelete = e.added_by === uid || isCreator;
+function payerRowHtml() {
+  return `
+    <div class="payer-row">
+      <select name="payerMember">
+        ${S.members.map((m) => `<option value="${m.id}">${escapeHtml(m.display_name)}</option>`).join('')}
+      </select>
+      <input type="number" name="payerAmount" required min="0.01" step="0.01" placeholder="Montant €" />
+      <button type="button" class="icon-btn" data-action="remove-payer-row" title="Retirer ce payeur">🗑</button>
+    </div>
+  `;
+}
+
+function renderExpenseForm() {
+  return `
+    <form data-action="add-expense" class="expense-form">
+      <input type="text" name="label" required placeholder="Libellé (ex : Courses)" />
+      <div class="payer-rows">${payerRowHtml()}</div>
+      <button type="button" class="link-btn" data-action="add-payer-row">+ Payé par plusieurs personnes (montants différents)</button>
+      <label class="muted">Justificatif (ticket de caisse, facture) — optionnel
+        <input type="file" name="receipt" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" />
+      </label>
+      <button type="submit">Ajouter la dépense</button>
+    </form>
+  `;
+}
+
+function renderExpense(e, uid, isAdmin, payers) {
+  const canDelete = e.added_by === uid || isAdmin;
+  const singlePayer = payers.length === 1;
+  const payerHtml = payers.length === 0
+    ? '<span class="muted">?</span>'
+    : singlePayer
+      ? (isAdmin ? `
+          <select data-action="reassign-expense-payer" data-id="${payers[0].id}" class="reassign-select">
+            ${S.members.map((m) => `<option value="${m.id}" ${m.id === payers[0].member_id ? 'selected' : ''}>${escapeHtml(m.display_name)}</option>`).join('')}
+          </select>
+        ` : `<strong>${escapeHtml(nameOf(payers[0].member_id))}</strong>`)
+      : `<span class="payer-breakdown">${payers.map((p) => `${escapeHtml(nameOf(p.member_id))} (${formatCents(p.amount_cents)})`).join(', ')}</span>`;
   return `
     <li class="expense-item">
       <span class="expense-label">${escapeHtml(e.label)}</span>
       <span class="expense-amount">${formatCents(e.amount_cents)}</span>
-      <span class="expense-payer">payé par
-        ${isCreator ? `
-          <select data-action="reassign-expense" data-id="${e.id}" class="reassign-select">
-            ${S.members.map((m) => `<option value="${m.id}" ${m.id === e.member_id ? 'selected' : ''}>${escapeHtml(m.display_name)}</option>`).join('')}
-          </select>
-        ` : `<strong>${escapeHtml(nameOf(e.member_id))}</strong>`}
-      </span>
-      ${canDelete ? `<button class="icon-btn" data-action="remove-expense" data-id="${e.id}">🗑</button>` : ''}
+      <span class="expense-payer">payé par ${payerHtml}</span>
+      ${e.receipt_url ? `<button class="icon-btn" data-action="view-receipt" data-path="${escapeHtml(e.receipt_url)}" title="Voir le justificatif">📎</button>` : ''}
+      ${canDelete ? `<button class="icon-btn" data-action="remove-expense" data-id="${e.id}" title="Supprimer cette dépense">🗑</button>` : ''}
     </li>
   `;
 }
@@ -826,10 +961,15 @@ function renderBalance(id, cents) {
 
 function renderTransaction(t, myMember) {
   const canDeclare = myMember && myMember.id === t.from;
+  const canRemind = myMember && myMember.id !== t.from;
+  const debtor = S.members.find((m) => m.id === t.from);
   return `
     <li class="tx-item">
       <span>${escapeHtml(nameOf(t.from))} → ${escapeHtml(nameOf(t.to))} : <strong>${formatCents(t.amount)}</strong></span>
-      ${canDeclare ? `<button data-action="declare-settlement" data-from="${t.from}" data-to="${t.to}" data-amount="${t.amount}">J'ai remboursé</button>` : ''}
+      <span class="tx-actions">
+        ${canDeclare ? `<button data-action="declare-settlement" data-from="${t.from}" data-to="${t.to}" data-amount="${t.amount}">J'ai remboursé</button>` : ''}
+        ${canRemind && debtor?.email ? `<button class="icon-btn" data-action="remind-debtor" data-email="${escapeHtml(debtor.email)}" data-name="${escapeHtml(debtor.display_name)}" data-amount="${t.amount}" title="Relancer par email">✉️ Relancer</button>` : ''}
+      </span>
     </li>
   `;
 }
@@ -864,7 +1004,8 @@ app.addEventListener('submit', async (e) => {
   if (!form) return;
   e.preventDefault();
   const action = form.dataset.action;
-  const data = Object.fromEntries(new FormData(form).entries());
+  const fd = new FormData(form);
+  const data = Object.fromEntries(fd.entries());
 
   try {
     if (action === 'login') {
@@ -896,8 +1037,18 @@ app.addEventListener('submit', async (e) => {
       await api.addMember(S.list.id, data.name, data.email);
       form.reset();
     } else if (action === 'add-expense') {
-      const cents = Math.round(parseFloat(data.amount) * 100);
-      await api.addExpense(S.list.id, data.memberId, data.label, cents);
+      const payerMembers = fd.getAll('payerMember');
+      const payerAmounts = fd.getAll('payerAmount');
+      // Si la même personne a été sélectionnée sur plusieurs lignes (par erreur ou pour
+      // cumuler), on fusionne au lieu de laisser la contrainte d'unicité échouer en base.
+      const payersByMember = new Map();
+      payerMembers.forEach((memberId, i) => {
+        const cents = Math.round(parseFloat(payerAmounts[i]) * 100);
+        payersByMember.set(memberId, (payersByMember.get(memberId) || 0) + cents);
+      });
+      const payers = [...payersByMember].map(([member_id, amount_cents]) => ({ member_id, amount_cents }));
+      const receiptFile = form.receipt?.files?.[0] || null;
+      await api.addExpense(S.list.id, data.label, payers, receiptFile);
       form.reset();
     } else if (action === 'edit-member-inline') {
       const id = form.dataset.id;
@@ -942,7 +1093,27 @@ app.addEventListener('submit', async (e) => {
 
 app.addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-action]');
-  if (!btn || btn.closest('form')) return;
+  if (!btn) return;
+
+  // Actions purement locales sur un formulaire en cours de saisie : pas de re-rendu, pour ne
+  // pas perdre ce que l'utilisateur a déjà tapé dans les autres champs.
+  if (btn.dataset.action === 'add-payer-row') {
+    btn.closest('form').querySelector('.payer-rows').insertAdjacentHTML('beforeend', payerRowHtml());
+    return;
+  }
+  if (btn.dataset.action === 'remove-payer-row') {
+    const rows = btn.closest('form').querySelectorAll('.payer-row');
+    if (rows.length > 1) btn.closest('.payer-row').remove();
+    return;
+  }
+  if (btn.dataset.action === 'copy-invite-link') {
+    const input = document.getElementById(btn.dataset.target);
+    await navigator.clipboard.writeText(input.value);
+    input.select();
+    return;
+  }
+
+  if (btn.closest('form')) return;
   const action = btn.dataset.action;
 
   try {
@@ -973,16 +1144,30 @@ app.addEventListener('click', async (e) => {
       setState({ inlineEdit: null });
     } else if (action === 'cancel-inline') {
       setState({ inlineEdit: null });
+    } else if (action === 'toggle-co-admin') {
+      await api.setCoAdmin(btn.dataset.id, btn.dataset.value === 'true');
     } else if (action === 'remove-expense') {
       await api.deleteExpense(btn.dataset.id);
+    } else if (action === 'view-receipt') {
+      const url = await api.getReceiptSignedUrl(btn.dataset.path);
+      window.open(url, '_blank', 'noopener');
     } else if (action === 'declare-settlement') {
       await api.declareSettlement(S.list.id, btn.dataset.from, btn.dataset.to, parseInt(btn.dataset.amount, 10));
     } else if (action === 'confirm-settlement') {
       await api.confirmSettlement(btn.dataset.id);
+    } else if (action === 'remind-debtor') {
+      const amount = formatCents(parseInt(btn.dataset.amount, 10));
+      const subject = encodeURIComponent(`Petit rappel — ${S.list.name}`);
+      const body = encodeURIComponent(`Salut ${btn.dataset.name},\n\nPetit rappel amical : sur la liste "${S.list.name}", il te reste ${amount} à rembourser.\n\nMerci !`);
+      window.location.href = `mailto:${encodeURIComponent(btn.dataset.email)}?subject=${subject}&body=${body}`;
     } else if (action === 'add-friend') {
       const category = app.querySelector('#new-friend-category')?.value.trim();
       await api.addFriend(btn.dataset.id, category);
       await loadFriends();
+    } else if (action === 'add-friend-from-link') {
+      await api.addFriend(btn.dataset.id, '');
+      await loadFriends();
+      setState({ friendsNotice: `${btn.dataset.name} a été ajouté·e à tes amis.` });
     } else if (action === 'remove-friend') {
       await api.removeFriend(btn.dataset.id);
       await loadFriends();
@@ -1031,8 +1216,8 @@ app.addEventListener('change', async (e) => {
   if (!el) return;
   const action = el.dataset.action;
   try {
-    if (action === 'reassign-expense') {
-      await api.reassignExpense(el.dataset.id, el.value);
+    if (action === 'reassign-expense-payer') {
+      await api.reassignExpensePayer(el.dataset.id, el.value);
     } else if (action === 'update-friend-category') {
       await api.updateFriendCategory(el.dataset.id, el.value);
       await loadFriends();

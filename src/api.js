@@ -119,6 +119,13 @@ export async function findProfileByEmail(email) {
   return data?.[0] || null;
 }
 
+// Carte publique minimale (pseudo + avatar) pour l'écran d'ajout via un lien d'invitation.
+export async function getPublicProfileCard(profileId) {
+  const { data, error } = await supabase.rpc('public_profile_card', { p_id: profileId });
+  if (error) throw error;
+  return data?.[0] || null;
+}
+
 export async function listFriends() {
   const { data, error } = await supabase.rpc('my_friends');
   if (error) throw error;
@@ -290,6 +297,11 @@ export async function deleteMember(memberId) {
   if (error) throw error;
 }
 
+export async function setCoAdmin(memberId, isCoAdmin) {
+  const { error } = await supabase.from('list_members').update({ is_co_admin: isCoAdmin }).eq('id', memberId);
+  if (error) throw error;
+}
+
 // ---------- Dépenses ----------
 
 export async function getExpenses(listId) {
@@ -298,26 +310,63 @@ export async function getExpenses(listId) {
   return data;
 }
 
-export async function addExpense(listId, memberId, label, amountCents) {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase.from('expenses').insert({
-    list_id: listId,
-    member_id: memberId,
-    label,
-    amount_cents: amountCents,
-    added_by: user.id,
-  });
+// À plat : { expense_id, member_id, amount_cents } pour toutes les dépenses de la liste —
+// une dépense peut avoir plusieurs payeurs à des montants différents.
+export async function getExpensePayers(listId) {
+  const { data, error } = await supabase.rpc('list_expense_payers', { p_list_id: listId });
   if (error) throw error;
+  return data;
 }
 
-export async function reassignExpense(expenseId, newMemberId) {
-  const { error } = await supabase.from('expenses').update({ member_id: newMemberId }).eq('id', expenseId);
+// `payers` : [{ member_id, amount_cents }, ...] (un seul élément dans le cas simple).
+export async function addExpense(listId, label, payers, receiptFile) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const totalCents = payers.reduce((sum, p) => sum + p.amount_cents, 0);
+  const { data: expense, error } = await supabase
+    .from('expenses')
+    .insert({ list_id: listId, label, amount_cents: totalCents, added_by: user.id })
+    .select()
+    .single();
+  if (error) throw error;
+
+  const { error: payersError } = await supabase
+    .from('expense_payers')
+    .insert(payers.map((p) => ({ expense_id: expense.id, member_id: p.member_id, amount_cents: p.amount_cents })));
+  if (payersError) throw payersError;
+
+  if (receiptFile) {
+    const path = await uploadReceipt(listId, expense.id, receiptFile);
+    await supabase.from('expenses').update({ receipt_url: path }).eq('id', expense.id);
+  }
+  return expense;
+}
+
+// Cas simple (un seul payeur) : change qui a payé, sans toucher au reste de la dépense.
+export async function reassignExpensePayer(expensePayerRowId, newMemberId) {
+  const { error } = await supabase.from('expense_payers').update({ member_id: newMemberId }).eq('id', expensePayerRowId);
   if (error) throw error;
 }
 
 export async function deleteExpense(expenseId) {
   const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
   if (error) throw error;
+}
+
+// ---------- Justificatifs (ticket de caisse / facture) ----------
+// Bucket privé : on stocke le chemin, et on génère une URL signée à la demande pour l'affichage.
+
+export async function uploadReceipt(listId, expenseId, file) {
+  const ext = file.name.split('.').pop();
+  const path = `${listId}/${expenseId}-${Date.now()}.${ext}`;
+  const { error } = await supabase.storage.from('receipts').upload(path, file, { contentType: file.type });
+  if (error) throw error;
+  return path;
+}
+
+export async function getReceiptSignedUrl(path) {
+  const { data, error } = await supabase.storage.from('receipts').createSignedUrl(path, 120);
+  if (error) throw error;
+  return data.signedUrl;
 }
 
 // ---------- Remboursements ----------
@@ -356,6 +405,7 @@ export function subscribeToList(listId, onChange) {
     .channel(`list-${listId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'list_members', filter: `list_id=eq.${listId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `list_id=eq.${listId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'expense_payers' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements', filter: `list_id=eq.${listId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'lists', filter: `id=eq.${listId}` }, onChange)
     .subscribe();
