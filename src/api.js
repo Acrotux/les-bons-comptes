@@ -347,6 +347,37 @@ export async function reassignExpensePayer(expensePayerRowId, newMemberId) {
   if (error) throw error;
 }
 
+// Modifie le libellé, la répartition des payeurs et/ou le justificatif d'une dépense déjà
+// enregistrée. `payerRowIdsToRemove` : ids des lignes expense_payers à supprimer (payeurs
+// retirés). On upsert d'abord les nouveaux payeurs puis on supprime les anciens, dans cet
+// ordre, pour ne jamais laisser le total de la dépense passer à zéro entre les deux étapes
+// (la contrainte "amount_cents > 0" rejetterait sinon la suppression du dernier payeur).
+export async function updateExpense(expenseId, listId, label, payers, payerRowIdsToRemove, receiptFile, removeReceipt) {
+  const updates = { label };
+  if (removeReceipt) updates.receipt_url = null;
+  const { error: labelError } = await supabase.from('expenses').update(updates).eq('id', expenseId);
+  if (labelError) throw labelError;
+
+  const { error: upsertError } = await supabase
+    .from('expense_payers')
+    .upsert(
+      payers.map((p) => ({ expense_id: expenseId, member_id: p.member_id, amount_cents: p.amount_cents })),
+      { onConflict: 'expense_id,member_id' }
+    );
+  if (upsertError) throw upsertError;
+
+  if (payerRowIdsToRemove.length) {
+    const { error: delError } = await supabase.from('expense_payers').delete().in('id', payerRowIdsToRemove);
+    if (delError) throw delError;
+  }
+
+  if (receiptFile) {
+    const path = await uploadReceipt(listId, expenseId, receiptFile);
+    const { error: receiptError } = await supabase.from('expenses').update({ receipt_url: path }).eq('id', expenseId);
+    if (receiptError) throw receiptError;
+  }
+}
+
 export async function deleteExpense(expenseId) {
   const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
   if (error) throw error;

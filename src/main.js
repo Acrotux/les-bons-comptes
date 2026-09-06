@@ -904,16 +904,30 @@ function renderMember(m, isCreator, isAdmin) {
   `;
 }
 
-function payerRowHtml() {
+function payerRowHtml(selectedMemberId, amountCents) {
+  const amountValue = amountCents != null ? (amountCents / 100).toFixed(2) : '';
   return `
     <div class="payer-row">
       <select name="payerMember">
-        ${S.members.map((m) => `<option value="${m.id}">${escapeHtml(m.display_name)}</option>`).join('')}
+        ${S.members.map((m) => `<option value="${m.id}" ${m.id === selectedMemberId ? 'selected' : ''}>${escapeHtml(m.display_name)}</option>`).join('')}
       </select>
-      <input type="number" name="payerAmount" required min="0.01" step="0.01" placeholder="Montant €" />
+      <input type="number" name="payerAmount" required min="0.01" step="0.01" placeholder="Montant €" value="${amountValue}" />
       <button type="button" class="icon-btn" data-action="remove-payer-row" title="Retirer ce payeur">🗑</button>
     </div>
   `;
+}
+
+// Si la même personne a été sélectionnée sur plusieurs lignes payeur (par erreur ou pour
+// cumuler), on fusionne au lieu de laisser la contrainte d'unicité échouer en base.
+function mergedPayersFromForm(fd) {
+  const payerMembers = fd.getAll('payerMember');
+  const payerAmounts = fd.getAll('payerAmount');
+  const payersByMember = new Map();
+  payerMembers.forEach((memberId, i) => {
+    const cents = Math.round(parseFloat(payerAmounts[i]) * 100);
+    payersByMember.set(memberId, (payersByMember.get(memberId) || 0) + cents);
+  });
+  return [...payersByMember].map(([member_id, amount_cents]) => ({ member_id, amount_cents }));
 }
 
 function renderExpenseForm() {
@@ -931,7 +945,30 @@ function renderExpenseForm() {
 }
 
 function renderExpense(e, uid, isAdmin, payers) {
-  const canDelete = e.added_by === uid || isAdmin;
+  const canManage = e.added_by === uid || isAdmin;
+
+  if (S.inlineEdit && S.inlineEdit.type === 'expense' && S.inlineEdit.id === e.id) {
+    return `
+      <li class="expense-item expense-item-editing">
+        <form data-action="edit-expense-inline" data-id="${e.id}" class="expense-form">
+          <input type="text" name="label" required value="${escapeHtml(e.label)}" placeholder="Libellé" />
+          <div class="payer-rows">
+            ${(payers.length ? payers.map((p) => payerRowHtml(p.member_id, p.amount_cents)) : [payerRowHtml()]).join('')}
+          </div>
+          <button type="button" class="link-btn" data-action="add-payer-row">+ Ajouter un payeur</button>
+          ${e.receipt_url ? `<label class="checkbox"><input type="checkbox" name="removeReceipt" /> Retirer le justificatif actuel</label>` : ''}
+          <label class="muted">${e.receipt_url ? 'Remplacer le justificatif' : 'Justificatif (ticket de caisse, facture)'} — optionnel
+            <input type="file" name="receipt" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" />
+          </label>
+          <div class="inline-edit-actions">
+            <button type="submit">Enregistrer</button>
+            <button type="button" data-action="cancel-inline">Annuler</button>
+          </div>
+        </form>
+      </li>
+    `;
+  }
+
   const singlePayer = payers.length === 1;
   const payerHtml = payers.length === 0
     ? '<span class="muted">?</span>'
@@ -948,7 +985,8 @@ function renderExpense(e, uid, isAdmin, payers) {
       <span class="expense-amount">${formatCents(e.amount_cents)}</span>
       <span class="expense-payer">payé par ${payerHtml}</span>
       ${e.receipt_url ? `<button class="icon-btn" data-action="view-receipt" data-path="${escapeHtml(e.receipt_url)}" title="Voir le justificatif">📎</button>` : ''}
-      ${canDelete ? `<button class="icon-btn" data-action="remove-expense" data-id="${e.id}" title="Supprimer cette dépense">🗑</button>` : ''}
+      ${canManage ? `<button class="icon-btn" data-action="edit-expense" data-id="${e.id}" title="Modifier cette dépense">✎</button>` : ''}
+      ${canManage ? `<button class="icon-btn" data-action="remove-expense" data-id="${e.id}" title="Supprimer cette dépense">🗑</button>` : ''}
     </li>
   `;
 }
@@ -1037,19 +1075,20 @@ app.addEventListener('submit', async (e) => {
       await api.addMember(S.list.id, data.name, data.email);
       form.reset();
     } else if (action === 'add-expense') {
-      const payerMembers = fd.getAll('payerMember');
-      const payerAmounts = fd.getAll('payerAmount');
-      // Si la même personne a été sélectionnée sur plusieurs lignes (par erreur ou pour
-      // cumuler), on fusionne au lieu de laisser la contrainte d'unicité échouer en base.
-      const payersByMember = new Map();
-      payerMembers.forEach((memberId, i) => {
-        const cents = Math.round(parseFloat(payerAmounts[i]) * 100);
-        payersByMember.set(memberId, (payersByMember.get(memberId) || 0) + cents);
-      });
-      const payers = [...payersByMember].map(([member_id, amount_cents]) => ({ member_id, amount_cents }));
+      const payers = mergedPayersFromForm(fd);
       const receiptFile = form.receipt?.files?.[0] || null;
       await api.addExpense(S.list.id, data.label, payers, receiptFile);
       form.reset();
+    } else if (action === 'edit-expense-inline') {
+      const expenseId = form.dataset.id;
+      const payers = mergedPayersFromForm(fd);
+      const newMemberIds = new Set(payers.map((p) => p.member_id));
+      const payerRowIdsToRemove = S.expensePayers
+        .filter((p) => p.expense_id === expenseId && !newMemberIds.has(p.member_id))
+        .map((p) => p.id);
+      const receiptFile = form.receipt?.files?.[0] || null;
+      await api.updateExpense(expenseId, S.list.id, data.label, payers, payerRowIdsToRemove, receiptFile, !!data.removeReceipt);
+      setState({ inlineEdit: null });
     } else if (action === 'edit-member-inline') {
       const id = form.dataset.id;
       await api.updateMember(id, data.name, data.email);
@@ -1112,6 +1151,10 @@ app.addEventListener('click', async (e) => {
     input.select();
     return;
   }
+  if (btn.dataset.action === 'cancel-inline') {
+    setState({ inlineEdit: null });
+    return;
+  }
 
   if (btn.closest('form')) return;
   const action = btn.dataset.action;
@@ -1142,10 +1185,10 @@ app.addEventListener('click', async (e) => {
     } else if (action === 'confirm-remove-member') {
       await api.deleteMember(btn.dataset.id);
       setState({ inlineEdit: null });
-    } else if (action === 'cancel-inline') {
-      setState({ inlineEdit: null });
     } else if (action === 'toggle-co-admin') {
       await api.setCoAdmin(btn.dataset.id, btn.dataset.value === 'true');
+    } else if (action === 'edit-expense') {
+      setState({ inlineEdit: { type: 'expense', id: btn.dataset.id } });
     } else if (action === 'remove-expense') {
       await api.deleteExpense(btn.dataset.id);
     } else if (action === 'view-receipt') {
