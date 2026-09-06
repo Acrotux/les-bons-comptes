@@ -230,12 +230,15 @@ function render() {
 
 function renderTopbar() {
   const avatar = renderAvatar(S.profile?.avatar_url, S.profile?.display_name, 'mini');
+  const isHome = S.view === 'home';
   return `
     <div class="topbar">
       <a href="#/" class="brand">🧾 Les Bons Comptes</a>
       <div class="profile-chip">
-        <a class="nav-link" href="#/amis">👥 Amis</a>
-        <a class="profile-link" href="#/profil">${avatar}<span>${escapeHtml(S.profile?.display_name || '')}</span></a>
+        ${isHome ? '' : `<a class="nav-link" href="#/amis">👥 Amis</a>`}
+        <a class="profile-link" href="#/profil" title="Paramètres">
+          ${avatar}${isHome ? '<span class="settings-gear" aria-hidden="true">⚙️</span>' : `<span>${escapeHtml(S.profile?.display_name || '')}</span>`}
+        </a>
         <button data-action="logout">Se déconnecter</button>
       </div>
     </div>

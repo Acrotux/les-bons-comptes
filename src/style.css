@@ -253,6 +253,7 @@ button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow
 .mail-link { color: var(--text-muted); text-decoration: none; }
 
 .profile-link { display: flex; align-items: center; gap: 0.5rem; text-decoration: none; color: var(--text); }
+.settings-gear { font-size: 1.1rem; }
 .avatar-mini, .avatar-large {
   border-radius: 50%;
   object-fit: cover;
