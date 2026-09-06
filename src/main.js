@@ -416,9 +416,9 @@ function renderOnboarding() {
 }
 
 const PROFILE_TABS = [
-  { key: 'compte', label: '👤 Compte' },
-  { key: 'amis', label: '👥 Amis' },
   { key: 'listes', label: '🧾 Mes listes' },
+  { key: 'amis', label: '👥 Amis' },
+  { key: 'compte', label: '👤 Compte' },
 ];
 
 function renderProfilePage() {
