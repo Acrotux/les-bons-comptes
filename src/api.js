@@ -400,6 +400,47 @@ export async function getReceiptSignedUrl(path) {
   return data.signedUrl;
 }
 
+// ---------- Justificatifs en attente ----------
+// Envoyés sans dépense associée pour l'instant (ex : plusieurs tickets d'un coup), à
+// attribuer un par un plus tard.
+
+export async function getPendingReceipts(listId) {
+  const { data, error } = await supabase.from('pending_receipts').select('*').eq('list_id', listId).order('created_at');
+  if (error) throw error;
+  return data;
+}
+
+export async function uploadPendingReceipt(listId, file) {
+  const ext = file.name.split('.').pop();
+  const path = `${listId}/pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error: uploadError } = await supabase.storage.from('receipts').upload(path, file, { contentType: file.type });
+  if (uploadError) throw uploadError;
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase.from('pending_receipts').insert({ list_id: listId, storage_path: path, uploaded_by: user.id });
+  if (error) throw error;
+}
+
+export async function discardPendingReceipt(id, storagePath) {
+  await supabase.storage.from('receipts').remove([storagePath]);
+  const { error } = await supabase.from('pending_receipts').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// Transforme un justificatif en attente en vraie dépense (libellé + payeur(s) fournis
+// maintenant). Passe par une fonction serveur atomique : n'importe quel participant actif
+// peut attribuer un justificatif, même envoyé par quelqu'un d'autre (voir le commentaire
+// dans supabase/v3_pending_receipts.sql).
+export async function attributeReceipt(pendingReceiptId, listId, label, payers) {
+  const { data, error } = await supabase.rpc('attribute_pending_receipt', {
+    p_pending_id: pendingReceiptId,
+    p_list_id: listId,
+    p_label: label,
+    p_payers: payers,
+  });
+  if (error) throw error;
+  return data;
+}
+
 // ---------- Remboursements ----------
 
 export async function getSettlements(listId) {
@@ -437,6 +478,7 @@ export function subscribeToList(listId, onChange) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'list_members', filter: `list_id=eq.${listId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `list_id=eq.${listId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'expense_payers' }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_receipts', filter: `list_id=eq.${listId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements', filter: `list_id=eq.${listId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'lists', filter: `id=eq.${listId}` }, onChange)
     .subscribe();

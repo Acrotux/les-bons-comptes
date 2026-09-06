@@ -27,6 +27,8 @@ const S = {
   memberSearchResults: [],
   expenses: [],
   expensePayers: [], // { id, expense_id, member_id, amount_cents }[]
+  pendingReceipts: [],
+  attributingReceiptId: null,
   settlements: [],
   friends: [],
   pendingInvites: [],
@@ -169,16 +171,17 @@ async function openList(listId) {
   if (S.unsubscribe) { S.unsubscribe(); S.unsubscribe = null; }
   try {
     const list = await api.getList(listId);
-    const [members, expenses, expensePayers, settlements, memberProfilesArr] = await Promise.all([
+    const [members, expenses, expensePayers, pendingReceipts, settlements, memberProfilesArr] = await Promise.all([
       api.getMembers(listId),
       api.getExpenses(listId),
       api.getExpensePayers(listId),
+      api.getPendingReceipts(listId),
       api.getSettlements(listId),
       api.getMemberProfiles(listId),
     ]);
     const memberProfiles = Object.fromEntries(memberProfilesArr.map((p) => [p.profile_id, p]));
     S.unsubscribe = api.subscribeToList(listId, () => refreshList(listId));
-    setState({ view: 'list', list, members, expenses, expensePayers, settlements, memberProfiles, memberSearchResults: [], listTab: 'apercu' });
+    setState({ view: 'list', list, members, expenses, expensePayers, pendingReceipts, settlements, memberProfiles, memberSearchResults: [], listTab: 'apercu' });
     location.hash = `#/list/${listId}`;
   } catch (e) {
     setState({ view: 'home', error: "Liste introuvable ou accès non autorisé." });
@@ -186,16 +189,17 @@ async function openList(listId) {
 }
 
 async function refreshList(listId) {
-  const [list, members, expenses, expensePayers, settlements, memberProfilesArr] = await Promise.all([
+  const [list, members, expenses, expensePayers, pendingReceipts, settlements, memberProfilesArr] = await Promise.all([
     api.getList(listId),
     api.getMembers(listId),
     api.getExpenses(listId),
     api.getExpensePayers(listId),
+    api.getPendingReceipts(listId),
     api.getSettlements(listId),
     api.getMemberProfiles(listId),
   ]);
   const memberProfiles = Object.fromEntries(memberProfilesArr.map((p) => [p.profile_id, p]));
-  setState({ list, members, expenses, expensePayers, settlements, memberProfiles });
+  setState({ list, members, expenses, expensePayers, pendingReceipts, settlements, memberProfiles });
 }
 
 // ---------------- Render ----------------
@@ -723,6 +727,7 @@ function renderList() {
         </ul>
         ${isMember ? renderExpenseForm() : ''}
       </div>
+      ${isMember ? renderPendingReceiptsCard(uid, isAdmin) : ''}
     `;
   } else if (activeTab === 'soldes') {
     tabContent = `
@@ -985,6 +990,52 @@ function renderExpense(e, uid, isAdmin, payers) {
   `;
 }
 
+function renderPendingReceiptsCard(uid, isAdmin) {
+  return `
+    <div class="card">
+      <h2>Justificatifs en attente</h2>
+      <p class="muted">Envoie un ou plusieurs tickets/factures maintenant, tu pourras les attribuer à une dépense (libellé, payeur, montant) plus tard, un par un.</p>
+      <form data-action="upload-pending-receipts">
+        <input type="file" name="receipts" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" multiple required />
+        <button type="submit">Envoyer</button>
+      </form>
+      ${S.pendingReceipts.length ? `
+        <ul class="member-list">
+          ${S.pendingReceipts.map((r) => renderPendingReceipt(r, uid, isAdmin)).join('')}
+        </ul>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderPendingReceipt(r, uid, isAdmin) {
+  const canManage = r.uploaded_by === uid || isAdmin;
+  if (S.attributingReceiptId === r.id) {
+    return `
+      <li>
+        <form data-action="attribute-receipt" data-id="${r.id}" class="expense-form">
+          <input type="text" name="label" required placeholder="Libellé (ex : Courses)" />
+          <div class="payer-rows">${payerRowHtml()}</div>
+          <button type="button" class="link-btn" data-action="add-payer-row">+ Payé par plusieurs personnes (montants différents)</button>
+          <div class="inline-edit-actions">
+            <button type="submit">Créer la dépense</button>
+            <button type="button" data-action="cancel-attribute-receipt">Annuler</button>
+          </div>
+        </form>
+      </li>
+    `;
+  }
+  const date = new Date(r.created_at).toLocaleDateString('fr-FR');
+  return `
+    <li>
+      <button class="icon-btn" data-action="view-receipt" data-path="${escapeHtml(r.storage_path)}" title="Voir le justificatif">📎 Justificatif</button>
+      <span class="muted">ajouté le ${date}</span>
+      <button data-action="start-attribute-receipt" data-id="${r.id}">Attribuer</button>
+      ${canManage ? `<button class="icon-btn" data-action="discard-pending-receipt" data-id="${r.id}" data-path="${escapeHtml(r.storage_path)}" title="Supprimer sans attribuer">🗑</button>` : ''}
+    </li>
+  `;
+}
+
 function renderBalance(id, cents) {
   const cls = cents > 0 ? 'credit' : cents < 0 ? 'debt' : 'even';
   const label = cents > 0 ? `doit recevoir ${formatCents(cents)}` : cents < 0 ? `doit ${formatCents(-cents)}` : 'à jour';
@@ -1083,6 +1134,15 @@ app.addEventListener('submit', async (e) => {
       const receiptFile = form.receipt?.files?.[0] || null;
       await api.updateExpense(expenseId, S.list.id, data.label, payers, payerRowIdsToRemove, receiptFile, !!data.removeReceipt);
       setState({ inlineEdit: null });
+    } else if (action === 'upload-pending-receipts') {
+      const files = [...form.receipts.files];
+      await Promise.all(files.map((file) => api.uploadPendingReceipt(S.list.id, file)));
+      form.reset();
+    } else if (action === 'attribute-receipt') {
+      const receiptId = form.dataset.id;
+      const payers = mergedPayersFromForm(fd);
+      await api.attributeReceipt(receiptId, S.list.id, data.label, payers);
+      setState({ attributingReceiptId: null });
     } else if (action === 'edit-member-inline') {
       const id = form.dataset.id;
       await api.updateMember(id, data.name, data.email);
@@ -1149,6 +1209,10 @@ app.addEventListener('click', async (e) => {
     setState({ inlineEdit: null });
     return;
   }
+  if (btn.dataset.action === 'cancel-attribute-receipt') {
+    setState({ attributingReceiptId: null });
+    return;
+  }
   if (btn.dataset.action === 'toggle-profile-menu') {
     setState({ profileMenuOpen: !S.profileMenuOpen });
     return;
@@ -1202,6 +1266,10 @@ app.addEventListener('click', async (e) => {
     } else if (action === 'view-receipt') {
       const url = await api.getReceiptSignedUrl(btn.dataset.path);
       window.open(url, '_blank', 'noopener');
+    } else if (action === 'start-attribute-receipt') {
+      setState({ attributingReceiptId: btn.dataset.id });
+    } else if (action === 'discard-pending-receipt') {
+      await api.discardPendingReceipt(btn.dataset.id, btn.dataset.path);
     } else if (action === 'declare-settlement') {
       await api.declareSettlement(S.list.id, btn.dataset.from, btn.dataset.to, parseInt(btn.dataset.amount, 10));
     } else if (action === 'confirm-settlement') {
