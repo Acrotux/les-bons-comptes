@@ -2,6 +2,7 @@ import './style.css';
 import { supabase } from './supabase.js';
 import * as api from './api.js';
 import { computeBalances, computeTransactions, formatCents } from './balances.js';
+import { extractTotalFromImage } from './ocr.js';
 
 const app = document.getElementById('app');
 
@@ -957,6 +958,56 @@ function mergedPayersFromForm(fd) {
   return [...payersByMember].map(([member_id, amount_cents]) => ({ member_id, amount_cents }));
 }
 
+// Manipule le DOM directement (pas de setState) pour ne pas effacer ce que l'utilisateur a
+// déjà tapé ailleurs dans le formulaire (libellé...) pendant que l'OCR tourne en arrière-plan.
+async function handleReceiptFileOcr(input) {
+  const file = input.files?.[0];
+  const form = input.closest('form');
+  const statusEl = form?.querySelector('[data-ocr-status]');
+  if (!file || !statusEl) return;
+  if (!file.type.startsWith('image/')) { statusEl.textContent = ''; return; }
+  statusEl.textContent = '🔍 Analyse automatique du montant en cours…';
+  try {
+    const cents = await extractTotalFromImage(file);
+    if (!document.body.contains(statusEl)) return;
+    const amountInput = form.querySelector('input[name="payerAmount"]');
+    if (cents != null) {
+      if (amountInput && !amountInput.value) amountInput.value = (cents / 100).toFixed(2);
+      statusEl.textContent = "✓ Montant détecté automatiquement — vérifie qu'il est correct.";
+    } else {
+      statusEl.textContent = 'Montant non détecté automatiquement, renseigne-le toi-même.';
+    }
+  } catch (err) {
+    console.error(err);
+    if (document.body.contains(statusEl)) statusEl.textContent = "Impossible d'analyser le ticket automatiquement.";
+  }
+}
+
+// Même principe pour un justificatif déjà envoyé (attribution) : l'image est récupérée via
+// une URL signée plutôt qu'un File local.
+async function runReceiptOcr(receiptId, storagePath) {
+  const form = () => app.querySelector(`form[data-action="attribute-receipt"][data-id="${receiptId}"]`);
+  const statusEl = () => form()?.querySelector('[data-ocr-status]');
+  if (statusEl()) statusEl().textContent = '🔍 Analyse automatique du montant en cours…';
+  try {
+    const url = await api.getReceiptSignedUrl(storagePath);
+    const cents = await extractTotalFromImage(url);
+    if (S.attributingReceiptId !== receiptId) return; // formulaire fermé/changé entre-temps
+    const amountInput = form()?.querySelector('input[name="payerAmount"]');
+    if (cents != null) {
+      if (amountInput && !amountInput.value) amountInput.value = (cents / 100).toFixed(2);
+      if (statusEl()) statusEl().textContent = "✓ Montant détecté automatiquement — vérifie qu'il est correct.";
+    } else if (statusEl()) {
+      statusEl().textContent = 'Montant non détecté automatiquement, renseigne-le toi-même.';
+    }
+  } catch (err) {
+    console.error(err);
+    if (S.attributingReceiptId === receiptId && statusEl()) {
+      statusEl().textContent = "Impossible d'analyser le ticket automatiquement.";
+    }
+  }
+}
+
 function renderExpenseForm() {
   return `
     <form data-action="add-expense" class="expense-form">
@@ -964,8 +1015,9 @@ function renderExpenseForm() {
       <div class="payer-rows">${payerRowHtml()}</div>
       <button type="button" class="link-btn" data-action="add-payer-row">+ Payé par plusieurs personnes (montants différents)</button>
       <label class="muted">Justificatif (ticket de caisse, facture) — optionnel
-        <input type="file" name="receipt" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" />
+        <input type="file" name="receipt" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" data-action="receipt-file-input" />
       </label>
+      <p class="muted hint" data-ocr-status></p>
       <button type="submit">Ajouter la dépense</button>
     </form>
   `;
@@ -985,8 +1037,9 @@ function renderExpense(e, uid, isAdmin, payers) {
           <button type="button" class="link-btn" data-action="add-payer-row">+ Ajouter un payeur</button>
           ${e.receipt_url ? `<label class="checkbox"><input type="checkbox" name="removeReceipt" /> Retirer le justificatif actuel</label>` : ''}
           <label class="muted">${e.receipt_url ? 'Remplacer le justificatif' : 'Justificatif (ticket de caisse, facture)'} — optionnel
-            <input type="file" name="receipt" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" />
+            <input type="file" name="receipt" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" data-action="receipt-file-input" />
           </label>
+          <p class="muted hint" data-ocr-status></p>
           <div class="inline-edit-actions">
             <button type="submit">Enregistrer</button>
             <button type="button" data-action="cancel-inline">Annuler</button>
@@ -1046,6 +1099,7 @@ function renderPendingReceipt(r, uid, isAdmin) {
           <input type="text" name="label" required placeholder="Libellé (ex : Courses)" value="${escapeHtml(r.label || '')}" />
           <div class="payer-rows">${payerRowHtml()}</div>
           <button type="button" class="link-btn" data-action="add-payer-row">+ Payé par plusieurs personnes (montants différents)</button>
+          <p class="muted hint" data-ocr-status></p>
           <div class="inline-edit-actions">
             <button type="submit">Créer la dépense</button>
             <button type="button" data-action="cancel-attribute-receipt">Annuler</button>
@@ -1060,7 +1114,7 @@ function renderPendingReceipt(r, uid, isAdmin) {
       <button class="icon-btn" data-action="view-receipt" data-path="${escapeHtml(r.storage_path)}" title="Aperçu">📎 Aperçu</button>
       <span>${r.label ? escapeHtml(r.label) : '<span class="muted">(sans libellé)</span>'}</span>
       <span class="muted">ajouté le ${date}</span>
-      <button data-action="start-attribute-receipt" data-id="${r.id}">Attribuer</button>
+      <button data-action="start-attribute-receipt" data-id="${r.id}" data-path="${escapeHtml(r.storage_path)}">Attribuer</button>
       ${canManage ? `<button class="icon-btn" data-action="discard-pending-receipt" data-id="${r.id}" data-path="${escapeHtml(r.storage_path)}" title="Supprimer sans attribuer">🗑</button>` : ''}
     </li>
   `;
@@ -1298,6 +1352,7 @@ app.addEventListener('click', async (e) => {
       window.open(url, '_blank', 'noopener');
     } else if (action === 'start-attribute-receipt') {
       setState({ attributingReceiptId: btn.dataset.id });
+      runReceiptOcr(btn.dataset.id, btn.dataset.path);
     } else if (action === 'discard-pending-receipt') {
       await api.discardPendingReceipt(btn.dataset.id, btn.dataset.path);
     } else if (action === 'declare-settlement') {
@@ -1364,7 +1419,9 @@ app.addEventListener('change', async (e) => {
   if (!el) return;
   const action = el.dataset.action;
   try {
-    if (action === 'reassign-expense-payer') {
+    if (action === 'receipt-file-input') {
+      handleReceiptFileOcr(el);
+    } else if (action === 'reassign-expense-payer') {
       await api.reassignExpensePayer(el.dataset.id, el.value);
     } else if (action === 'update-friend-category') {
       await api.updateFriendCategory(el.dataset.id, el.value);
