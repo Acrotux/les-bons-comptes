@@ -20,6 +20,7 @@ const S = {
   lists: [],
   pendingListInvites: [],
   homeTab: 'toutes',
+  profileTab: 'compte',
   list: null,
   listTab: 'apercu',
   members: [],
@@ -414,14 +415,20 @@ function renderOnboarding() {
   `;
 }
 
+const PROFILE_TABS = [
+  { key: 'compte', label: '👤 Compte' },
+  { key: 'amis', label: '👥 Amis' },
+  { key: 'listes', label: '🧾 Mes listes' },
+];
+
 function renderProfilePage() {
   const p = S.profile;
   const avatar = renderAvatar(p?.avatar_url, p?.display_name, 'large');
-  return `
-    <div class="page">
-      <h1>Mon profil</h1>
-      ${S.profileNotice ? `<div class="banner notice">${escapeHtml(S.profileNotice)}</div>` : ''}
+  const activeTab = PROFILE_TABS.some((t) => t.key === S.profileTab) ? S.profileTab : 'compte';
 
+  let tabContent;
+  if (activeTab === 'compte') {
+    tabContent = `
       <div class="card">
         <h2>Photo de profil</h2>
         <div class="avatar-row">
@@ -458,13 +465,6 @@ function renderProfilePage() {
         </form>
       </div>
 
-      <h2>Mes amis</h2>
-      ${renderFriendsSections()}
-
-      <h2>Mes listes de dépense</h2>
-      ${renderMyListsSection()}
-      <a class="link-btn" href="#/">+ Créer une nouvelle liste →</a>
-
       <div class="card danger-zone">
         <h2>Zone dangereuse</h2>
         ${S.confirmDeleteAccount ? `
@@ -479,6 +479,26 @@ function renderProfilePage() {
           <button data-action="ask-delete-account" class="danger-btn">Supprimer mon compte</button>
         `}
       </div>
+    `;
+  } else if (activeTab === 'amis') {
+    tabContent = renderFriendsSections();
+  } else {
+    tabContent = `
+      ${renderMyListsSection()}
+      <a class="link-btn" href="#/">+ Créer une nouvelle liste →</a>
+    `;
+  }
+
+  return `
+    <div class="page">
+      <h1>Mon profil</h1>
+      ${S.profileNotice ? `<div class="banner notice">${escapeHtml(S.profileNotice)}</div>` : ''}
+
+      <div class="tabs">
+        ${PROFILE_TABS.map((t) => `<button class="tab ${t.key === activeTab ? 'active' : ''}" data-action="switch-profile-tab" data-tab="${t.key}">${escapeHtml(t.label)}</button>`).join('')}
+      </div>
+
+      ${tabContent}
 
       <a class="link-btn" href="#/">&larr; Retour</a>
     </div>
@@ -1270,6 +1290,8 @@ app.addEventListener('click', async (e) => {
       await loadHome();
     } else if (action === 'switch-home-tab') {
       setState({ homeTab: btn.dataset.tab });
+    } else if (action === 'switch-profile-tab') {
+      setState({ profileTab: btn.dataset.tab });
     } else if (action === 'switch-list-tab') {
       setState({ listTab: btn.dataset.tab });
     } else if (action === 'ask-delete-account') {
